@@ -1,3 +1,4 @@
+using BillaresPos.Api.Billiards;
 using BillaresPos.Application.Common.Abstractions;
 using BillaresPos.Application.Common.Exceptions;
 using BillaresPos.Infrastructure.Identity;
@@ -33,6 +34,7 @@ public static class SalePdfEndpoints
         var cashier = await db.Users.AsNoTracking().SingleOrDefaultAsync(x => x.Id == sale.UserId, ct);
         var timeZone = FindTimeZone(tenant.TimeZoneId);
         var localCreatedAt = TimeZoneInfo.ConvertTime(sale.CreatedAt, timeZone);
+        var billiard = await BilliardSaleLookup.FindAsync(db, sale, ct);
         var model = new SalesReceiptPdfModel(
             tenant.Name,
             tenant.Currency,
@@ -49,7 +51,10 @@ public static class SalePdfEndpoints
             sale.Subtotal,
             sale.Discount,
             sale.Total,
-            sale.Payments.Select(x => new SalesReceiptPdfPayment(PaymentName(x.Method), x.Amount)).ToList());
+            sale.Payments.Select(x => new SalesReceiptPdfPayment(PaymentName(x.Method), x.Amount)).ToList(),
+            billiard?.TableName,
+            billiard is null ? null : TimeZoneInfo.ConvertTime(billiard.StartedAtUtc, timeZone),
+            billiard?.EndedAtUtc is null ? null : TimeZoneInfo.ConvertTime(billiard.EndedAtUtc.Value, timeZone));
 
         var bytes = pdfService.CreateSalesReceipt(model);
         return Results.File(bytes, "application/pdf", $"comprobante-venta-{sale.SequentialNumber}.pdf");

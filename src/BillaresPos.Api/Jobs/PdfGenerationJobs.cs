@@ -1,3 +1,4 @@
+using BillaresPos.Api.Billiards;
 using BillaresPos.Api.Reports;
 using BillaresPos.Application.Common.Abstractions;
 using BillaresPos.Domain.Reports;
@@ -28,6 +29,7 @@ public sealed class PdfGenerationJobs(IServiceScopeFactory scopeFactory)
             var tenant = await db.Tenants.SingleAsync(x => x.Id == document.TenantId);
             var cashier = await db.Users.IgnoreQueryFilters().SingleOrDefaultAsync(x => x.Id == sale.UserId && x.TenantId == document.TenantId);
             var timeZone = FindTimeZone(tenant.TimeZoneId);
+            var billiard = await BilliardSaleLookup.FindAsync(db, sale, CancellationToken.None);
             var model = new SalesReceiptPdfModel(
                 tenant.Name,
                 tenant.Currency,
@@ -40,7 +42,10 @@ public sealed class PdfGenerationJobs(IServiceScopeFactory scopeFactory)
                 sale.Subtotal,
                 sale.Discount,
                 sale.Total,
-                sale.Payments.Select(x => new SalesReceiptPdfPayment(PaymentName(x.Method), x.Amount)).ToList());
+                sale.Payments.Select(x => new SalesReceiptPdfPayment(PaymentName(x.Method), x.Amount)).ToList(),
+                billiard?.TableName,
+                billiard is null ? null : TimeZoneInfo.ConvertTime(billiard.StartedAtUtc, timeZone),
+                billiard?.EndedAtUtc is null ? null : TimeZoneInfo.ConvertTime(billiard.EndedAtUtc.Value, timeZone));
 
             document.Content = pdfService.CreateSalesReceipt(model);
             document.Status = GeneratedDocumentStatus.Generated;

@@ -4,7 +4,7 @@ using BillaresPos.Domain.Sales;
 
 namespace BillaresPos.Api.Billiards;
 
-public sealed record CreateBilliardTableRequest(string Name, decimal HourlyRate, int BillingIncrementMinutes);
+public sealed record CreateBilliardTableRequest(string Name, decimal HourlyRate, int BillingIncrementMinutes, BilliardTableKind Kind = BilliardTableKind.Billiard);
 
 public sealed record UpdateBilliardTableRequest(string Name, decimal HourlyRate, int BillingIncrementMinutes);
 
@@ -17,7 +17,9 @@ public sealed record BilliardTableResponse(
     Guid? ActiveSessionId,
     DateTimeOffset? StartedAtUtc,
     long TotalPausedSeconds,
-    DateTimeOffset? PausedAtUtc);
+    DateTimeOffset? PausedAtUtc,
+    BilliardTableKind Kind,
+    decimal ConsumptionTotal);
 
 public sealed record AddBilliardConsumptionRequest(Guid ProductId, decimal Quantity);
 
@@ -32,11 +34,13 @@ public sealed record BilliardSessionResponse(
     decimal BilliardCharge,
     decimal ConsumptionTotal,
     decimal Total,
-    Guid? SaleId);
+    Guid? SaleId,
+    DateTimeOffset StartedAtUtc,
+    DateTimeOffset? EndedAtUtc);
 
 
 
 public sealed record BilliardConsumptionResponse(Guid Id, Guid ProductId, string DescriptionSnapshot, decimal Quantity, decimal UnitPrice, decimal Subtotal);
 
-public sealed record BilliardSessionDetailResponse(Guid SessionId, Guid TableId, BilliardSessionStatus Status, long ElapsedSeconds, int BilledMinutes, decimal BilliardCharge, decimal ConsumptionTotal, decimal Total, IReadOnlyList<BilliardConsumptionResponse> Consumptions);
+public sealed record BilliardSessionDetailResponse(Guid SessionId, Guid TableId, BilliardSessionStatus Status, long ElapsedSeconds, int BilledMinutes, decimal BilliardCharge, decimal ConsumptionTotal, decimal Total, IReadOnlyList<BilliardConsumptionResponse> Consumptions, DateTimeOffset StartedAtUtc, DateTimeOffset? EndedAtUtc);
 

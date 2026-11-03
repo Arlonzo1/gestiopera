@@ -1,4 +1,5 @@
 using BillaresPos.Api.Notifications;
+using BillaresPos.Application.Common;
 using BillaresPos.Application.Common.Abstractions;
 using BillaresPos.Domain.Notifications;
 using BillaresPos.Infrastructure.Persistence;
@@ -66,8 +67,8 @@ public sealed class InventoryAlertJobs(
                 };
                 var body = type.Value switch
                 {
-                    NotificationType.StockLow => $"{product.Name}: quedan {product.CurrentStock:N0} unidades. Se recomienda hacer una reposición.",
-                    NotificationType.StockCritical => $"{product.Name}: quedan {product.CurrentStock:N0} unidades. Reposición prioritaria requerida.",
+                    NotificationType.StockLow => $"{product.Name}: quedan {ColombianFormat.Number(product.CurrentStock)} unidades. Se recomienda hacer una reposición.",
+                    NotificationType.StockCritical => $"{product.Name}: quedan {ColombianFormat.Number(product.CurrentStock)} unidades. Reposición prioritaria requerida.",
                     NotificationType.OutOfStock => $"{product.Name}: el inventario llegó a 0 unidades.",
                     _ => product.Name
                 };

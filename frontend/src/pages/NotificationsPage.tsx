@@ -6,13 +6,15 @@ import { EmptyState, Feedback, Panel, SectionHeading } from '../components/ui'
 import { getNotificationPreferences, getNotifications, markNotificationRead, registerNotificationDevice, updateNotificationPreferences } from '../api'
 import { isPushConfigured, requestPushToken } from '../firebasePush'
 import { getSaleDetails } from '../api'
+import { useAuthStore } from '../authStore'
 
 const dateFormatter = new Intl.DateTimeFormat('es-CO', { dateStyle: 'medium', timeStyle: 'short' })
 
 export default function NotificationsPage() {
   const queryClient = useQueryClient()
   const notifications = useQuery({ queryKey: ['notifications'], queryFn: () => getNotifications() })
-  const preferences = useQuery({ queryKey: ['notification-preferences'], queryFn: getNotificationPreferences })
+  const canManage = useAuthStore(state => state.auth?.user.roles.some(role => role === 'OWNER' || role === 'ADMINISTRATOR') ?? false)
+  const preferences = useQuery({ queryKey: ['notification-preferences'], queryFn: getNotificationPreferences, enabled: canManage })
   const [mode, setMode] = useState<'Never' | 'AllSales' | 'AboveAmount'>('AllSales')
   const [amount, setAmount] = useState('0')
   const [pushEnabled, setPushEnabled] = useState(true)
@@ -44,7 +46,7 @@ export default function NotificationsPage() {
 
   return <AppLayout eyebrow="SUPERVISIÓN" title="Notificaciones" actions={<button className="secondary-button" onClick={() => void notifications.refetch()}><Bell size={16} />Actualizar</button>}>
     <section className="content notification-content">
-      <Panel className="notification-settings">
+      {canManage && <Panel className="notification-settings">
         <SectionHeading eyebrow="PREFERENCIAS" title="Canales de aviso" icon={<Bell size={21} />} />
         <div className="notification-preference-form">
           <label>Recibir ventas<select value={mode} onChange={event => setMode(event.target.value as typeof mode)}><option value="AllSales">Todas las ventas</option><option value="AboveAmount">Solo sobre un monto</option><option value="Never">No recibir</option></select></label>
@@ -58,7 +60,7 @@ export default function NotificationsPage() {
         </div>
         {savePreferences.isSuccess && <Feedback kind="success">Preferencias guardadas.</Feedback>}
         {pushMessage && <Feedback kind={enablePush.isError ? 'error' : 'notice'}>{pushMessage}</Feedback>}
-      </Panel>
+      </Panel>}
       <Panel>
         <SectionHeading eyebrow="BANDEJA" title="Actividad reciente" action={<div className="notification-filter"><button className={filter === 'all' ? 'filter-button active' : 'filter-button'} onClick={() => setFilter('all')}>Todas ({items.length})</button><button className={filter === 'unread' ? 'filter-button active' : 'filter-button'} onClick={() => setFilter('unread')}>No leídas ({unread})</button></div>} />
         {notifications.isLoading && <EmptyState>Cargando notificaciones...</EmptyState>}
@@ -70,10 +72,10 @@ export default function NotificationsPage() {
     {detailId && saleDetail.data && <div className="modal-backdrop" role="presentation" onClick={() => setDetailId(null)}>
       <section className="sale-detail-modal" role="dialog" aria-modal="true" aria-labelledby="sale-detail-title" onClick={event => event.stopPropagation()}>
         <div className="modal-heading"><div><p className="eyebrow">DETALLE DE VENTA</p><h2 id="sale-detail-title">Venta #{saleDetail.data.sequentialNumber}</h2></div><button className="icon-button" onClick={() => setDetailId(null)} aria-label="Cerrar"><X size={20} /></button></div>
-        <div className="sale-detail-meta"><span>Fecha: {dateFormatter.format(new Date(saleDetail.data.createdAt))}</span><span>A nombre de: {saleDetail.data.customerName ?? 'No registrado'}</span><span>Cajero: {saleDetail.data.cashierName ?? 'No registrado'}</span>{saleDetail.data.tableName && <span>Mesa: {saleDetail.data.tableName}</span>}{saleDetail.data.billiardMinutes !== null && <span>Tiempo: {saleDetail.data.billiardMinutes} min</span>}</div>
+        <div className="sale-detail-meta"><span>Fecha: {dateFormatter.format(new Date(saleDetail.data.createdAt))}</span><span>A nombre de: {saleDetail.data.customerName ?? 'No registrado'}</span><span>Cajero: {saleDetail.data.cashierName ?? 'No registrado'}</span>{saleDetail.data.tableName && <span>Mesa: {saleDetail.data.tableName}</span>}{saleDetail.data.billiardStartedAt && <span>Inicio: {dateFormatter.format(new Date(saleDetail.data.billiardStartedAt))}</span>}{saleDetail.data.billiardEndedAt && <span>Final: {dateFormatter.format(new Date(saleDetail.data.billiardEndedAt))}</span>}{saleDetail.data.billiardMinutes !== null && <span>Tiempo: {saleDetail.data.billiardMinutes} min</span>}</div>
         <div className="sale-detail-items">{saleDetail.data.items.map((item, index) => <div className="sale-detail-row" key={index}><span>{item.quantity} x {item.description}</span><strong>{item.subtotal.toLocaleString('es-CO')} COP</strong></div>)}</div>
         <div className="sale-detail-total"><span>Total</span><strong>{saleDetail.data.total.toLocaleString('es-CO')} COP</strong></div>
-        <div className="sale-detail-payments"><strong>Medios de pago</strong>{saleDetail.data.payments.map((payment, index) => <div key={index}><span>{payment.method === 'Cash' ? 'Efectivo' : payment.method === 'Card' ? 'Tarjeta' : payment.method === 'Transfer' ? 'Transferencia' : payment.method}</span><span>{payment.amount.toLocaleString('es-CO')} COP</span></div>)}</div>
+        <div className="sale-detail-payments"><strong>Medios de pago</strong>{saleDetail.data.payments.map((payment, index) => <div key={index}><span>{({ Cash: 'Efectivo', Nequi: 'Nequi', Daviplata: 'Daviplata', Card: 'Tarjeta', BankTransfer: 'Transferencia', Other: 'Otro' } as Record<string, string>)[payment.method] ?? payment.method}</span><span>{payment.amount.toLocaleString('es-CO')} COP</span></div>)}</div>
       </section>
     </div>}  </AppLayout>
 }

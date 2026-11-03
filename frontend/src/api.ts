@@ -1,4 +1,4 @@
-import type { AuthResponse, CashShift, CashShiftHistory, DashboardResponse, ExpensePaymentMethod, SaleResponse, InventoryMovementResponse, PhysicalCountResponse, Product, PurchaseResponse, ReportResponse, AuditLogResponse, EmployeeResponse, SessionDetail, SessionResult, Table, NotificationResponse, NotificationPreferenceResponse, SaleDetailResponse } from './types'
+import type { AuthResponse, CashShift, CashShiftHistory, DashboardResponse, ExpensePaymentMethod, SaleResponse, InventoryMovementResponse, PhysicalCountResponse, Product, PurchaseResponse, ReportResponse, AuditLogResponse, EmployeeResponse, SessionDetail, SessionResult, Table, TableKind, NotificationResponse, NotificationPreferenceResponse, SaleDetailResponse } from './types'
 import { useAuthStore } from './authStore'
 import type { Branding } from './branding'
 
@@ -37,7 +37,7 @@ export const getDashboard = () => request<DashboardResponse>('/api/dashboard')
 export const getTenantBranding = () => request<Branding>('/api/tenants/branding')
 export const updateTenantBranding = (value: Branding) => request<Branding>('/api/tenants/branding', { method: 'PUT', body: JSON.stringify(value) })
 export const getTables = () => request<Table[]>('/api/billiards/tables')
-export const createBilliardTable = (name: string, hourlyRate: number, billingIncrementMinutes: number) => request<Table>('/api/billiards/tables', { method: 'POST', body: JSON.stringify({ name, hourlyRate, billingIncrementMinutes }) })
+export const createBilliardTable = (name: string, hourlyRate: number, billingIncrementMinutes: number, kind: TableKind = 'Billiard') => request<Table>('/api/billiards/tables', { method: 'POST', body: JSON.stringify({ name, hourlyRate, billingIncrementMinutes, kind }) })
 export const updateBilliardTable = (id: string, value: { name: string; hourlyRate: number; billingIncrementMinutes: number }) => request<Table>('/api/billiards/tables/' + id, { method: 'PATCH', body: JSON.stringify(value) })
 export const getProducts = () => request<Product[]>('/api/products')
 export const getSession = (id: string) => request<SessionDetail>(`/api/billiards/sessions/${id}`)

@@ -36,9 +36,9 @@ public static class ReportEndpoints
         var currentFrom = from ?? currentTo;
 
         if (currentFrom > currentTo)
-            throw new ValidationAppException("El rango de fechas no es valido.", new Dictionary<string, string[]> { ["from"] = ["La fecha inicial no puede ser posterior a la fecha final."] });
+            throw new ValidationAppException("El rango de fechas no es válido.", new Dictionary<string, string[]> { ["from"] = ["La fecha inicial no puede ser posterior a la fecha final."] });
         if (currentTo.DayNumber - currentFrom.DayNumber > 366)
-            throw new ValidationAppException("El rango de fechas no puede superar 367 dias.", new Dictionary<string, string[]> { ["to"] = ["Reduce el rango de fechas."] });
+            throw new ValidationAppException("El rango de fechas no puede superar 367 días.", new Dictionary<string, string[]> { ["to"] = ["Reduce el rango de fechas."] });
 
         var days = currentTo.DayNumber - currentFrom.DayNumber + 1;
         var previousTo = currentFrom.AddDays(-1);
@@ -84,6 +84,12 @@ public static class ReportEndpoints
             .OrderBy(x => x.Date)
             .ToList();
 
+        var salesByHour = sales
+            .GroupBy(x => TimeZoneInfo.ConvertTime(x.CreatedAt, timeZone).Hour)
+            .Select(x => new ReportHourRow(x.Key, x.Sum(row => row.Total), x.Count()))
+            .OrderBy(x => x.Hour)
+            .ToList();
+
         var employeeRows = sales
             .GroupBy(x => x.UserId)
             .Select(x => new { UserId = x.Key, Amount = x.Sum(sale => sale.Total), SalesCount = x.Count() })
@@ -111,23 +117,38 @@ public static class ReportEndpoints
             .Take(20)
             .ToList();
 
-        var allSessions = await db.BilliardSessions.IgnoreQueryFilters().Where(x => x.TenantId == tenantId).AsNoTracking().ToListAsync(ct);
+        var billiardTableIds = await db.BilliardTables.IgnoreQueryFilters()
+            .Where(x => x.TenantId == tenantId && x.Kind == BilliardTableKind.Billiard)
+            .Select(x => x.Id)
+            .ToListAsync(ct);
+        var allSessions = await db.BilliardSessions.IgnoreQueryFilters().Where(x => x.TenantId == tenantId && billiardTableIds.Contains(x.BilliardTableId)).AsNoTracking().ToListAsync(ct);
         var billiardSessions = allSessions
             .Where(x => x.StartedAtUtc < utcEnd && (x.EndedAtUtc ?? utcEnd) >= utcStart)
             .ToList();
-        var billiardHours = billiardSessions.Sum(x =>
+        decimal SessionHours(BilliardSession x)
         {
             var start = x.StartedAtUtc < utcStart ? utcStart : x.StartedAtUtc;
             var end = x.EndedAtUtc is null || x.EndedAtUtc > utcEnd ? utcEnd : x.EndedAtUtc.Value;
             return (decimal)Math.Max(0, (end - start).TotalSeconds - x.TotalPausedSeconds) / 3600m;
-        });
+        }
+        var billiardHours = billiardSessions.Sum(SessionHours);
+
+        var tableIds = billiardSessions.Select(x => x.BilliardTableId).Distinct().ToArray();
+        var tableNames = await db.BilliardTables.IgnoreQueryFilters()
+            .Where(x => tableIds.Contains(x.Id) && x.TenantId == tenantId)
+            .ToDictionaryAsync(x => x.Id, x => x.Name, ct);
+        var billiardByTable = billiardSessions
+            .GroupBy(x => x.BilliardTableId)
+            .Select(x => new ReportTableRow(x.Key, tableNames.GetValueOrDefault(x.Key, "Mesa"), decimal.Round(x.Sum(SessionHours), 2), x.Count()))
+            .OrderByDescending(x => x.Hours)
+            .ToList();
 
         var cancelledSales = allSales.Count(x => x.CreatedAt >= utcStart && x.CreatedAt < utcEnd && x.Status == SaleStatus.Cancelled);
         return new ReportMetrics(
             Round(grossSales), Round(productRevenue), Round(billiardRevenue), Round(cogs),
             Round(grossSales - cogs), Round(totalExpenses), Round(grossSales - cogs - totalExpenses),
             Round(cashPayments), Round(electronicPayments), decimal.Round(billiardHours, 2),
-            sales.Count, cancelledSales, paymentRows, salesByDay, salesByEmployee, productRows);
+            sales.Count, cancelledSales, paymentRows, salesByDay, salesByEmployee, productRows, salesByHour, billiardByTable);
     }
     private static (DateTimeOffset Start, DateTimeOffset End) UtcRange(DateOnly from, DateOnly to, TimeZoneInfo timeZone)
     {

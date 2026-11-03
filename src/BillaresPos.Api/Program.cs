@@ -15,6 +15,7 @@ using BillaresPos.Api.Products;
 using BillaresPos.Api.Reports;
 using BillaresPos.Api.Purchases;
 using BillaresPos.Api.Sales;
+using BillaresPos.Application.Common;
 using BillaresPos.Application.Common.Abstractions;
 using BillaresPos.Domain.Auditing;
 using BillaresPos.Domain.Identity;
@@ -49,7 +50,7 @@ builder.Services.Configure<JwtOptions>(builder.Configuration.GetSection(JwtOptio
 var jwtOptions = builder.Configuration.GetSection(JwtOptions.SectionName).Get<JwtOptions>() ?? new JwtOptions();
 if (string.IsNullOrWhiteSpace(jwtOptions.SigningKey) || jwtOptions.SigningKey.Length < 32)
 {
-    throw new InvalidOperationException("Jwt:SigningKey must be configured and at least 32 characters long.");
+    throw new InvalidOperationException("Jwt:SigningKey debe estar configurada y tener al menos 32 caracteres.");
 }
 
 builder.Services.ConfigureHttpJsonOptions(options => options.SerializerOptions.Converters.Add(new JsonStringEnumConverter()));
@@ -65,7 +66,7 @@ builder.Services.AddScoped<PdfGenerationJobs>();
     builder.Services.AddScoped<NotificationService>();
 builder.Services.AddScoped<NotificationJobs>();
 builder.Services.AddScoped<InventoryAlertJobs>();
-var hangfireConnection = builder.Configuration.GetConnectionString("DefaultConnection") ?? throw new InvalidOperationException("DefaultConnection is required for Hangfire.");
+var hangfireConnection = builder.Configuration.GetConnectionString("DefaultConnection") ?? throw new InvalidOperationException("Se requiere DefaultConnection para Hangfire.");
 if (!builder.Environment.IsEnvironment("Testing"))
 {
     builder.Services.AddHangfire(configuration => configuration
@@ -278,7 +279,7 @@ purchases.MapPost("", async (
 {
     if (currentTenant.TenantId is null || currentUser.UserId is null)
     {
-        throw new ForbiddenException("An authenticated tenant user is required.");
+        throw new ForbiddenException("Se requiere un usuario autenticado del negocio.");
     }
 
     if (request.Items is null || request.Items.Count == 0 ||
@@ -286,10 +287,10 @@ purchases.MapPost("", async (
         request.Items.Any(x => x.Quantity <= 0 || decimal.Truncate(x.Quantity) != x.Quantity || x.UnitCost < 0 || decimal.Truncate(x.UnitCost) != x.UnitCost))
     {
         throw new ValidationAppException(
-            "Invalid purchase data.",
+            "Los datos de la compra no son válidos.",
             new Dictionary<string, string[]>
             {
-                ["purchase"] = ["At least one item is required. Date, quantity and unit cost must be valid."]
+                ["purchase"] = ["Agrega al menos un producto. La fecha, la cantidad y el costo unitario deben ser válidos."]
             });
     }
 
@@ -303,7 +304,7 @@ purchases.MapPost("", async (
 
     if (productsById.Count != productIds.Length)
     {
-        throw new NotFoundException("One or more products were not found in the current tenant.");
+        throw new NotFoundException("Uno o más productos no existen en el negocio.");
     }
 
     var purchase = new Purchase
@@ -375,7 +376,7 @@ purchases.MapPost("", async (
     var notificationIds = await notificationService.CreateForOwnersAsync(
         purchase.TenantId, NotificationType.PurchaseCompleted,
         "Compra recibida",
-        $"Se registrÃƒÂ³ una compra por {purchase.Total:N0} COP con {purchase.Items.Count} producto(s). El inventario fue actualizado.",
+        $"Se registró una compra por {ColombianFormat.Number(purchase.Total)} COP con {purchase.Items.Count} producto(s). El inventario fue actualizado.",
         "Purchase", purchase.Id, purchase.CreatedAt, null, cancellationToken);
     await dbContext.SaveChangesAsync(cancellationToken);
     if (services.GetService<IBackgroundJobClient>() is { } backgroundJobs)
@@ -404,21 +405,12 @@ sales.MapGet("/{id:guid}", async (Guid id, AppDbContext db, CancellationToken ct
         .Select(x => x.FullName)
         .SingleOrDefaultAsync(ct);
 
-    string? tableName = null;
     int? billiardMinutes = sale.Items
         .Where(x => x.ItemType == SaleItemType.BilliardTime)
         .Select(x => (int?)x.Quantity)
         .FirstOrDefault();
 
-    const string sessionPrefix = "Billiard session ";
-    if (sale.Notes?.StartsWith(sessionPrefix, StringComparison.Ordinal) == true &&
-        Guid.TryParse(sale.Notes[sessionPrefix.Length..], out var sessionId))
-    {
-        tableName = await db.BilliardSessions.AsNoTracking()
-            .Where(x => x.Id == sessionId && x.TenantId == sale.TenantId)
-            .Join(db.BilliardTables.AsNoTracking(), session => session.BilliardTableId, table => table.Id, (_, table) => table.Name)
-            .SingleOrDefaultAsync(ct);
-    }
+    var billiard = await BilliardSaleLookup.FindAsync(db, sale, ct);
 
     return Results.Ok(new SaleDetailResponse(
         sale.Id,
@@ -430,11 +422,13 @@ sales.MapGet("/{id:guid}", async (Guid id, AppDbContext db, CancellationToken ct
         sale.Total,
         cashierName,
         sale.CustomerName,
-        tableName,
+        billiard?.TableName,
         billiardMinutes,
         sale.Items.OrderBy(x => x.Id).Select(x => new SaleDetailItemResponse(
             x.DescriptionSnapshot, x.Quantity, x.UnitPrice, x.Subtotal, x.ItemType.ToString())).ToList(),
-        sale.Payments.Select(x => new SaleDetailPaymentResponse(x.Method.ToString(), x.Amount)).ToList()));
+        sale.Payments.Select(x => new SaleDetailPaymentResponse(x.Method.ToString(), x.Amount)).ToList(),
+        billiard?.StartedAtUtc,
+        billiard?.EndedAtUtc));
 });
 sales.MapPost("", async (
     CreateSaleRequest request,
@@ -448,7 +442,7 @@ sales.MapPost("", async (
 {
     if (currentTenant.TenantId is null || currentUser.UserId is null)
     {
-        throw new ForbiddenException("An authenticated tenant user is required.");
+        throw new ForbiddenException("Se requiere un usuario autenticado del negocio.");
     }
 
     if (request.Items is null || request.Items.Count == 0 ||
@@ -459,10 +453,10 @@ sales.MapPost("", async (
         decimal.Truncate(request.Discount) != request.Discount)
     {
         throw new ValidationAppException(
-            "Invalid sale data.",
+            "Los datos de la venta no son válidos.",
             new Dictionary<string, string[]>
             {
-                ["sale"] = ["At least one item and payment are required. Quantities, payments and discount must be positive or zero."]
+                ["sale"] = ["Agrega al menos un producto y un pago. Las cantidades, los pagos y el descuento deben ser positivos o cero."]
             });
     }
 
@@ -476,7 +470,7 @@ sales.MapPost("", async (
 
     if (productsById.Count != productIds.Length)
     {
-        throw new NotFoundException("One or more products were not found in the current tenant.");
+        throw new NotFoundException("Uno o más productos no existen en el negocio.");
     }
 
     var quantitiesByProduct = request.Items
@@ -488,10 +482,10 @@ sales.MapPost("", async (
         if (productsById[productId].CurrentStock < quantity)
         {
             throw new ValidationAppException(
-                "Insufficient inventory.",
+                "Inventario insuficiente.",
                 new Dictionary<string, string[]>
                 {
-                    ["quantity"] = [$"Product {productId} does not have enough stock."]
+                    ["quantity"] = [$"{productsById[productId].Name} no tiene inventario suficiente."]
                 });
         }
     }
@@ -502,16 +496,16 @@ sales.MapPost("", async (
     if (total < 0)
     {
         throw new ValidationAppException(
-            "Invalid discount.",
-            new Dictionary<string, string[]> { ["discount"] = ["Discount cannot exceed the subtotal."] });
+            "El descuento no es válido.",
+            new Dictionary<string, string[]> { ["discount"] = ["El descuento no puede superar el subtotal."] });
     }
 
     var paymentsTotal = decimal.Round(request.Payments.Sum(x => x.Amount), 2, MidpointRounding.ToEven);
     if (paymentsTotal != total)
     {
         throw new ValidationAppException(
-            "Payment total does not match sale total.",
-            new Dictionary<string, string[]> { ["payments"] = ["Payment amounts must equal the sale total."] });
+            "El total pagado no coincide con el total de la venta.",
+            new Dictionary<string, string[]> { ["payments"] = ["La suma de los pagos debe ser igual al total de la venta."] });
     }
 
     var activeCashShiftId = await dbContext.CashShifts.Where(x => x.UserId == currentUser.UserId && x.Status == BillaresPos.Domain.CashManagement.CashShiftStatus.Open).Select(x => (Guid?)x.Id).FirstOrDefaultAsync(cancellationToken);
@@ -601,7 +595,7 @@ sales.MapPost("", async (
         sale.TenantId,
         NotificationType.SaleCompleted,
         "Nueva venta",
-        $"Venta #{sale.SequentialNumber} por {sale.Total:N0} COP.",
+        $"Venta #{sale.SequentialNumber} por {ColombianFormat.Number(sale.Total)} COP.",
         "Sale",
         sale.Id,
         sale.CreatedAt,
@@ -639,14 +633,14 @@ sales.MapPost("/{id:guid}/cancel", async (
 {
     if (currentTenant.TenantId is null || currentUser.UserId is null)
     {
-        throw new ForbiddenException("An authenticated tenant user is required.");
+        throw new ForbiddenException("Se requiere un usuario autenticado del negocio.");
     }
 
     if (string.IsNullOrWhiteSpace(request.Reason))
     {
         throw new ValidationAppException(
-            "Cancellation reason is required.",
-            new Dictionary<string, string[]> { ["reason"] = ["A cancellation reason is required."] });
+            "El motivo de anulación es obligatorio.",
+            new Dictionary<string, string[]> { ["reason"] = ["Escribe el motivo de la anulación."] });
     }
 
     await using var transaction = await dbContext.Database.BeginTransactionAsync(
@@ -658,14 +652,14 @@ sales.MapPost("/{id:guid}/cancel", async (
 
     if (sale is null)
     {
-        throw new NotFoundException("Sale not found.");
+        throw new NotFoundException("Venta no encontrada.");
     }
 
     if (sale.Status != SaleStatus.Completed)
     {
         throw new ValidationAppException(
-            "Sale cannot be cancelled.",
-            new Dictionary<string, string[]> { ["status"] = ["Only completed sales can be cancelled."] });
+            "La venta no se puede anular.",
+            new Dictionary<string, string[]> { ["status"] = ["Solo se pueden anular ventas completadas."] });
     }
 
     var productIds = sale.Items
@@ -679,7 +673,7 @@ sales.MapPost("/{id:guid}/cancel", async (
 
     if (productsById.Count != productIds.Length)
     {
-        throw new NotFoundException("A product referenced by the sale no longer exists.");
+        throw new NotFoundException("Uno de los productos de la venta ya no existe.");
     }
 
     foreach (var item in sale.Items.Where(x => x.ProductId is not null))
@@ -757,22 +751,22 @@ products.MapPost("", async (
         request.CriticalStock > request.MinimumStock)
     {
         throw new ValidationAppException(
-            "Invalid product data.",
+            "Los datos del producto no son válidos.",
             new Dictionary<string, string[]>
             {
-                ["product"] = ["Name is required, prices and thresholds must be non-negative, and CriticalStock cannot exceed MinimumStock."]
+                ["product"] = ["El nombre es obligatorio; los precios y los stocks mínimo y crítico deben ser enteros no negativos, y el stock crítico no puede superar el mínimo."]
             });
     }
 
     if (currentTenant.TenantId is null)
     {
-        throw new ForbiddenException("A tenant is required.");
+        throw new ForbiddenException("Se requiere un negocio.");
     }
 
     if (request.CategoryId is not null &&
         !await dbContext.ProductCategories.AnyAsync(x => x.Id == request.CategoryId && x.IsActive, cancellationToken))
     {
-        throw new NotFoundException("Category not found.");
+        throw new NotFoundException("Categoría no encontrada.");
     }
 
     var normalizedSku = string.IsNullOrWhiteSpace(request.Sku) ? null : request.Sku.Trim();
@@ -780,8 +774,8 @@ products.MapPost("", async (
         await dbContext.Products.AnyAsync(x => x.Sku == normalizedSku, cancellationToken))
     {
         throw new ValidationAppException(
-            "A product with the same SKU already exists.",
-            new Dictionary<string, string[]> { ["sku"] = ["SKU must be unique within the tenant."] });
+            "Ya existe un producto con ese SKU.",
+            new Dictionary<string, string[]> { ["sku"] = ["El SKU debe ser único dentro del negocio."] });
     }
 
     var product = new Product
@@ -820,16 +814,16 @@ products.MapPatch("/{id:guid}", async (
         request.CriticalStock > request.MinimumStock)
     {
         throw new ValidationAppException(
-            "Los datos del producto no son vÃƒÂ¡lidos.",
-            new Dictionary<string, string[]> { ["product"] = ["El nombre es obligatorio; los precios y umbrales no pueden ser negativos, y el stock crÃƒÂ­tico no puede superar el stock mÃƒÂ­nimo."] });
+            "Los datos del producto no son válidos.",
+            new Dictionary<string, string[]> { ["product"] = ["El nombre es obligatorio; los precios y umbrales no pueden ser negativos, y el stock crítico no puede superar el stock mínimo."] });
     }
-    if (currentTenant.TenantId is null) throw new ForbiddenException("Se requiere un tenant.");
+    if (currentTenant.TenantId is null) throw new ForbiddenException("Se requiere un negocio.");
 
     var product = await dbContext.Products.FirstOrDefaultAsync(x => x.Id == id && x.IsActive, cancellationToken);
     if (product is null) throw new NotFoundException("Producto no encontrado.");
     var normalizedSku = string.IsNullOrWhiteSpace(request.Sku) ? null : request.Sku.Trim();
     if (normalizedSku is not null && await dbContext.Products.AnyAsync(x => x.Id != id && x.Sku == normalizedSku, cancellationToken))
-        throw new ValidationAppException("El SKU ya estÃƒÂ¡ registrado.", new Dictionary<string, string[]> { ["sku"] = ["El SKU debe ser ÃƒÂºnico dentro del negocio."] });
+        throw new ValidationAppException("El SKU ya está registrado.", new Dictionary<string, string[]> { ["sku"] = ["El SKU debe ser único dentro del negocio."] });
 
     product.Name = request.Name.Trim();
     product.Sku = normalizedSku;
@@ -848,7 +842,7 @@ products.MapPost("/{id:guid}/deactivate", async (
     var product = await dbContext.Products.FirstOrDefaultAsync(x => x.Id == id, cancellationToken);
     if (product is null)
     {
-        throw new NotFoundException("Product not found.");
+        throw new NotFoundException("Producto no encontrado.");
     }
 
     product.IsActive = false;
@@ -871,13 +865,13 @@ inventory.MapPost("/{productId:guid}/adjust", async (
     if (request.Quantity == 0 || decimal.Truncate(request.Quantity) != request.Quantity || request.MovementType is not (InventoryMovementType.Adjustment or InventoryMovementType.InitialStock))
     {
         throw new ValidationAppException(
-            "Invalid inventory adjustment.",
+            "El ajuste de inventario no es válido.",
             new Dictionary<string, string[]> { ["quantity"] = ["La cantidad debe ser un entero distinto de cero y el tipo debe ser Adjustment o InitialStock."] });
     }
 
     if (currentTenant.TenantId is null || currentUser.UserId is null)
     {
-        throw new ForbiddenException("An authenticated tenant user is required.");
+        throw new ForbiddenException("Se requiere un usuario autenticado del negocio.");
     }
 
     await using var transaction = await dbContext.Database.BeginTransactionAsync(
@@ -887,15 +881,15 @@ inventory.MapPost("/{productId:guid}/adjust", async (
         x => x.Id == productId && x.IsActive, cancellationToken);
     if (product is null)
     {
-        throw new NotFoundException("Product not found.");
+        throw new NotFoundException("Producto no encontrado.");
     }
 
     var nextStock = product.CurrentStock + request.Quantity;
     if (nextStock < 0)
     {
         throw new ValidationAppException(
-            "Inventory cannot become negative.",
-            new Dictionary<string, string[]> { ["quantity"] = ["The adjustment would result in negative stock."] });
+            "El inventario no puede quedar negativo.",
+            new Dictionary<string, string[]> { ["quantity"] = ["El ajuste dejaría el stock en negativo."] });
     }
 
     product.CurrentStock = nextStock;

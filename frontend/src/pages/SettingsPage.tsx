@@ -4,7 +4,7 @@ import { useMutation, useQuery } from "@tanstack/react-query"
 import AppLayout from "../components/AppLayout"
 import { createBilliardTable, getTables, updateBilliardTable, getTenantBranding, updateTenantBranding } from "../api"
 import { useAuthStore } from "../authStore"
-import type { Table } from "../types"
+import type { Table, TableKind } from "../types"
 import { getBranding, saveBranding } from "../branding"
 
 const money = (value: number) => new Intl.NumberFormat("es-CO", { style: "currency", currency: "COP", maximumFractionDigits: 0 }).format(value)
@@ -13,12 +13,14 @@ export default function SettingsPage() {
   const auth = useAuthStore((state) => state.auth)
   const [message, setMessage] = useState("")
   const [editTable, setEditTable] = useState<Table | null>(null)
+  const [newKind, setNewKind] = useState<TableKind>("Billiard")
   const initialBranding = getBranding()
   const [brandName, setBrandName] = useState(initialBranding.name)
   const [logoDataUrl, setLogoDataUrl] = useState<string | null>(initialBranding.logoDataUrl)
   const [brandingMessage, setBrandingMessage] = useState("")
   const { data: tables = [], isLoading, refetch } = useQuery({ queryKey: ["tables"], queryFn: getTables })
   const canManage = auth?.user.roles.some((role) => role === "OWNER" || role === "ADMINISTRATOR")
+  const isOwner = auth?.user.roles.includes("OWNER") ?? false
   const update = useMutation({
     mutationFn: ({ id, value }: { id: string; value: { name: string; hourlyRate: number; billingIncrementMinutes: number } }) => updateBilliardTable(id, value),
     onSuccess: async () => { setEditTable(null); setMessage("Mesa actualizada correctamente"); await refetch() },
@@ -75,11 +77,14 @@ export default function SettingsPage() {
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    const form = new FormData(event.currentTarget)
+    const formElement = event.currentTarget
+    const form = new FormData(formElement)
     setMessage("")
     try {
-      await createBilliardTable(String(form.get("name") ?? ""), Number(form.get("hourlyRate")), Number(form.get("billingIncrementMinutes")))
-      event.currentTarget.reset()
+      if (newKind === "Regular") await createBilliardTable(String(form.get("name") ?? ""), 0, 15, "Regular")
+      else await createBilliardTable(String(form.get("name") ?? ""), Number(form.get("hourlyRate")), Number(form.get("billingIncrementMinutes")))
+      formElement.reset()
+      setNewKind("Billiard")
       setMessage("Mesa creada correctamente")
       await refetch()
     } catch (err) {
@@ -87,9 +92,9 @@ export default function SettingsPage() {
     }
   }
 
-  return <AppLayout eyebrow="ADMINISTRACION" title="Configuracion">
+  return <AppLayout eyebrow="ADMINISTRACIÓN" title="Configuración">
     <section className="content">
-      <section className="table-config-panel branding-panel">
+      {isOwner && <section className="table-config-panel branding-panel">
         <div className="panel-heading"><div><p className="eyebrow">IDENTIDAD DEL NEGOCIO</p><h2>Marca del establecimiento</h2></div></div>
         <p className="muted">Personaliza el nombre y el logo que aparecen en la esquina superior del menu.</p>
         <form className="form-stack compact" onSubmit={saveBrandingSettings}>
@@ -99,23 +104,24 @@ export default function SettingsPage() {
           <div className="modal-actions"><button className="primary-button">Guardar identidad</button>{logoDataUrl && <button type="button" className="secondary-button" onClick={() => setLogoDataUrl(null)}>Quitar logo</button>}</div>
         </form>
         {brandingMessage && <div className="notice">{brandingMessage}</div>}
-      </section>
+      </section>}
       <section className="table-config-panel">
-        <div className="panel-heading"><div><p className="eyebrow">MESAS DE BILLAR</p><h2>Configuracion de mesas</h2></div><Settings2 size={21} /></div>
-        <p className="muted">Configura cuantas mesas tiene tu establecimiento y define como se cobra el tiempo de juego.</p>
+        <div className="panel-heading"><div><p className="eyebrow">MESAS DE BILLAR</p><h2>Configuración de mesas</h2></div><Settings2 size={21} /></div>
+        <p className="muted">Configura cuántas mesas tiene tu establecimiento y define cómo se cobra el tiempo de juego.</p>
         {canManage ? <form className="table-config-form" onSubmit={submit}>
-          <label>Nombre de la mesa<input name="name" placeholder="Mesa 1" required /></label>
-          <label>Tarifa por hora (COP)<input name="hourlyRate" type="number" min="0" step="1" placeholder="30000" required /></label>
-          <label>Facturacion cada (minutos)<select name="billingIncrementMinutes" defaultValue="15"><option value="1">Cada minuto</option><option value="5">Cada 5 minutos</option><option value="10">Cada 10 minutos</option><option value="15">Cada 15 minutos</option><option value="30">Cada 30 minutos</option><option value="60">Cada hora</option></select></label>
+          <label>Tipo de mesa<select value={newKind} onChange={(event) => setNewKind(event.target.value as TableKind)}><option value="Billiard">Mesa de billar (cobra tiempo)</option><option value="Regular">Mesa de bar (solo consumo)</option></select></label>
+          <label>Nombre de la mesa<input name="name" placeholder={newKind === "Regular" ? "Mesa bar 1" : "Mesa 1"} required /></label>
+          {newKind === "Billiard" && <><label>Tarifa por hora (COP)<input name="hourlyRate" type="number" min="0" step="1" placeholder="30000" required /></label>
+          <label>Facturación cada (minutos)<select name="billingIncrementMinutes" defaultValue="15"><option value="1">Cada minuto</option><option value="5">Cada 5 minutos</option><option value="10">Cada 10 minutos</option><option value="15">Cada 15 minutos</option><option value="30">Cada 30 minutos</option><option value="60">Cada hora</option></select></label></>}
           <button className="primary-button"><Plus size={16} />Agregar mesa</button>
-        </form> : <div className="notice">Solo el propietario o un administrador puede modificar esta configuracion.</div>}
+        </form> : <div className="notice">Solo el propietario o un administrador puede modificar esta configuración.</div>}
         {message && <div className="notice">{message}</div>}
       </section>
       <section className="products-panel">
-        <div className="panel-heading"><div><p className="eyebrow">CATALOGO ACTIVO</p><h2>Mesas configuradas</h2></div><strong>{tables.length}</strong></div>
+        <div className="panel-heading"><div><p className="eyebrow">CATÁLOGO ACTIVO</p><h2>Mesas configuradas</h2></div><strong>{tables.length}</strong></div>
         {isLoading ? <p className="muted">Cargando mesas...</p> : <div className="settings-table-list">{tables.map((table) => <div className="settings-table-row" key={table.id}>
-          <div><strong>{table.name}</strong><span className="muted">{table.billingIncrementMinutes === 60 ? "Cobro por hora" : "Cobro cada " + table.billingIncrementMinutes + " minutos"}</span></div>
-          <strong>{money(table.hourlyRate)} / hora</strong>
+          <div><strong>{table.name}</strong><span className="muted">{table.kind === "Regular" ? "Mesa de bar" : table.billingIncrementMinutes === 60 ? "Cobro por hora" : "Cobro cada " + table.billingIncrementMinutes + " minutos"}</span></div>
+          <strong>{table.kind === "Regular" ? "Solo consumo" : `${money(table.hourlyRate)} / hora`}</strong>
           {canManage && <button className="icon-button" title="Editar mesa" onClick={() => setEditTable(table)}><Pencil size={16} /></button>}
         </div>)}</div>}
       </section>
@@ -131,11 +137,11 @@ function EditTable({ table, pending, onClose, onSave }: { table: Table; pending:
     onSave({ name: String(form.get("name") ?? ""), hourlyRate: Number(form.get("hourlyRate")), billingIncrementMinutes: Number(form.get("billingIncrementMinutes")) })
   }
   return <div className="modal-backdrop"><section className="modal inventory-modal" role="dialog" aria-modal="true">
-    <div className="panel-heading"><div><p className="eyebrow">CONFIGURACION DE MESA</p><h2>Editar {table.name}</h2></div><button type="button" className="icon-button" onClick={onClose} title="Cerrar">×</button></div>
+    <div className="panel-heading"><div><p className="eyebrow">CONFIGURACIÓN DE MESA</p><h2>Editar {table.name}</h2></div><button type="button" className="icon-button" onClick={onClose} title="Cerrar">×</button></div>
     <form className="form-stack compact" onSubmit={submit}>
       <label>Nombre de la mesa<input name="name" defaultValue={table.name} required /></label>
-      <label>Tarifa por hora (COP)<input name="hourlyRate" type="number" min="0" step="1" defaultValue={table.hourlyRate} required /></label>
-      <label>Facturacion cada (minutos)<select name="billingIncrementMinutes" defaultValue={String(table.billingIncrementMinutes)}><option value="1">Cada minuto</option><option value="5">Cada 5 minutos</option><option value="10">Cada 10 minutos</option><option value="15">Cada 15 minutos</option><option value="30">Cada 30 minutos</option><option value="60">Cada hora</option></select></label>
+      {table.kind !== "Regular" && <><label>Tarifa por hora (COP)<input name="hourlyRate" type="number" min="0" step="1" defaultValue={table.hourlyRate} required /></label>
+      <label>Facturación cada (minutos)<select name="billingIncrementMinutes" defaultValue={String(table.billingIncrementMinutes)}><option value="1">Cada minuto</option><option value="5">Cada 5 minutos</option><option value="10">Cada 10 minutos</option><option value="15">Cada 15 minutos</option><option value="30">Cada 30 minutos</option><option value="60">Cada hora</option></select></label></>}
       <div className="modal-actions"><button type="button" className="secondary-button" onClick={onClose}>Cancelar</button><button className="primary-button" disabled={pending}>{pending ? "Guardando..." : "Guardar cambios"}</button></div>
     </form>
   </section></div>

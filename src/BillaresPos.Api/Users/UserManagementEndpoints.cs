@@ -51,12 +51,12 @@ public static class UserManagementEndpoints
         CancellationToken ct)
     {
         if (tenant.TenantId is null || currentUser.UserId is null)
-            throw new ForbiddenException("Se requiere un usuario autenticado del tenant.");
+            throw new ForbiddenException("Se requiere un usuario autenticado del negocio.");
         var role = NormalizeRole(request.Role);
         if (string.IsNullOrWhiteSpace(request.Email) || string.IsNullOrWhiteSpace(request.FullName) || string.IsNullOrWhiteSpace(request.Password) || role is null)
-            throw new ValidationAppException("Los datos del empleado no son validos.", new Dictionary<string, string[]> { ["employee"] = ["Correo, nombre, contraseña y rol son obligatorios."] });
-        if (role == RoleNames.Owner && !http.HttpContext!.User.IsInRole(RoleNames.Owner))
-            throw new ForbiddenException("Solo OWNER puede crear otro OWNER.");
+            throw new ValidationAppException("Los datos del empleado no son válidos.", new Dictionary<string, string[]> { ["employee"] = ["Correo, nombre, contraseña y rol son obligatorios."] });
+        if (role != RoleNames.Cashier && !http.HttpContext!.User.IsInRole(RoleNames.Owner))
+            throw new ForbiddenException("Solo el propietario puede crear administradores o propietarios.");
 
         var user = new ApplicationUser
         {
@@ -87,17 +87,20 @@ public static class UserManagementEndpoints
         CancellationToken ct)
     {
         if (tenant.TenantId is null || currentUser.UserId is null)
-            throw new ForbiddenException("Se requiere un usuario autenticado del tenant.");
+            throw new ForbiddenException("Se requiere un usuario autenticado del negocio.");
         var role = NormalizeRole(request.Role);
         if (role is null)
-            throw new ValidationAppException("El rol no es valido.", new Dictionary<string, string[]> { ["role"] = ["Use OWNER, ADMINISTRATOR o CASHIER."] });
-        if (role == RoleNames.Owner && !http.HttpContext!.User.IsInRole(RoleNames.Owner))
-            throw new ForbiddenException("Solo OWNER puede asignar OWNER.");
+            throw new ValidationAppException("El rol no es válido.", new Dictionary<string, string[]> { ["role"] = ["Usa propietario (OWNER), administrador (ADMINISTRATOR) o cajero (CASHIER)."] });
+        if (id == currentUser.UserId.Value)
+            throw new ValidationAppException("No puedes cambiar tu propio rol.", new Dictionary<string, string[]> { ["role"] = ["Pide a otro propietario que cambie tu rol."] });
+        var isOwner = http.HttpContext!.User.IsInRole(RoleNames.Owner);
+        if (role != RoleNames.Cashier && !isOwner)
+            throw new ForbiddenException("Solo el propietario puede asignar los roles de administrador o propietario.");
         var user = await db.Users.FirstOrDefaultAsync(x => x.Id == id, ct);
         if (user is null) throw new NotFoundException("Empleado no encontrado.");
         var oldRoles = await manager.GetRolesAsync(user);
-        if (oldRoles.Contains(RoleNames.Owner) && !http.HttpContext!.User.IsInRole(RoleNames.Owner))
-            throw new ForbiddenException("Solo OWNER puede modificar un OWNER.");
+        if (!isOwner && (oldRoles.Contains(RoleNames.Owner) || oldRoles.Contains(RoleNames.Administrator)))
+            throw new ForbiddenException("Solo el propietario puede modificar administradores o propietarios.");
         var result = await manager.RemoveFromRolesAsync(user, oldRoles);
         if (!result.Succeeded) throw new ValidationAppException("No se pudo actualizar el rol.", new Dictionary<string, string[]> { ["role"] = ["Identity no pudo actualizar el rol."] });
         result = await manager.AddToRoleAsync(user, role);
@@ -120,15 +123,15 @@ public static class UserManagementEndpoints
         CancellationToken ct)
     {
         if (tenant.TenantId is null || currentUser.UserId is null)
-            throw new ForbiddenException("Se requiere un usuario autenticado del tenant.");
+            throw new ForbiddenException("Se requiere un usuario autenticado del negocio.");
         if (id == currentUser.UserId.Value)
             throw new ValidationAppException("No puedes desactivar tu propio usuario.", new Dictionary<string, string[]> { ["user"] = ["El usuario actualmente conectado no se puede desactivar."] });
 
         var user = await db.Users.FirstOrDefaultAsync(x => x.Id == id, ct);
         if (user is null) throw new NotFoundException("Empleado no encontrado.");
         var roles = await manager.GetRolesAsync(user);
-        if (roles.Contains(RoleNames.Owner) && !http.HttpContext!.User.IsInRole(RoleNames.Owner))
-            throw new ForbiddenException("Solo OWNER puede modificar un OWNER.");
+        if ((roles.Contains(RoleNames.Owner) || roles.Contains(RoleNames.Administrator)) && !http.HttpContext!.User.IsInRole(RoleNames.Owner))
+            throw new ForbiddenException("Solo el propietario puede activar o desactivar administradores o propietarios.");
         if (user.IsActive == request.IsActive)
             return Results.Ok(new EmployeeResponse(user.Id, user.Email ?? string.Empty, user.FullName, roles.ToArray(), user.IsActive, user.CreatedAt));
 

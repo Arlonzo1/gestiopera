@@ -18,7 +18,7 @@ public sealed class MetaWhatsAppService(
         var apiVersion = configuration["WhatsApp:ApiVersion"] ?? "v25.0";
 
         if (string.IsNullOrWhiteSpace(accessToken) || string.IsNullOrWhiteSpace(phoneNumberId))
-            throw new InvalidOperationException("WhatsApp Cloud API is enabled but AccessToken or PhoneNumberId is missing.");
+            throw new InvalidOperationException("WhatsApp Cloud API está activado, pero falta AccessToken o PhoneNumberId.");
 
         var endpoint = $"https://graph.facebook.com/{apiVersion}/{phoneNumberId}/messages";
         using var request = new HttpRequestMessage(HttpMethod.Post, endpoint);
@@ -42,7 +42,7 @@ public sealed class MetaWhatsAppService(
         var phoneNumberId = configuration["WhatsApp:PhoneNumberId"];
         var apiVersion = configuration["WhatsApp:ApiVersion"] ?? "v25.0";
         if (string.IsNullOrWhiteSpace(accessToken) || string.IsNullOrWhiteSpace(phoneNumberId))
-            throw new InvalidOperationException("WhatsApp Cloud API is enabled but AccessToken or PhoneNumberId is missing.");
+            throw new InvalidOperationException("WhatsApp Cloud API está activado, pero falta AccessToken o PhoneNumberId.");
         using var media = new MultipartFormDataContent();
         media.Add(new StringContent("whatsapp"), "messaging_product");
         var fileContent = new ByteArrayContent(content);
@@ -56,7 +56,7 @@ public sealed class MetaWhatsAppService(
             throw new HttpRequestException($"Meta WhatsApp media upload returned {(int)uploadResponse.StatusCode}: {uploadBody}");
         using var uploadJson = System.Text.Json.JsonDocument.Parse(uploadBody);
         var mediaId = uploadJson.RootElement.GetProperty("id").GetString();
-        if (string.IsNullOrWhiteSpace(mediaId)) throw new InvalidOperationException("Meta did not return a media id.");
+        if (string.IsNullOrWhiteSpace(mediaId)) throw new InvalidOperationException("Meta no devolvió el identificador del archivo.");
         using var request = new HttpRequestMessage(HttpMethod.Post, $"https://graph.facebook.com/{apiVersion}/{phoneNumberId}/messages");
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
         request.Content = JsonContent.Create(new { messaging_product = "whatsapp", recipient_type = "individual", to = recipientPhoneNumber, type = "document", document = new { id = mediaId, caption, filename = fileName } });
@@ -84,7 +84,7 @@ public sealed class MetaWhatsAppService(
             type = "template",
             template = new
             {
-                name = message.TemplateName ?? throw new InvalidOperationException("WhatsApp template name is required."),
+                name = message.TemplateName ?? throw new InvalidOperationException("El nombre de la plantilla de WhatsApp es obligatorio."),
                 language = new { code = message.LanguageCode ?? "es" },
                 components = message.BodyParameters is not { Count: > 0 }
                     ? null

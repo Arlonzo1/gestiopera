@@ -1,4 +1,5 @@
 export type TableStatus = 'Available' | 'Occupied' | 'Paused'
+export type TableKind = 'Billiard' | 'Regular'
 
 export interface Table {
   id: string
@@ -10,6 +11,8 @@ export interface Table {
   startedAtUtc: string | null
   totalPausedSeconds: number
   pausedAtUtc: string | null
+  kind: TableKind
+  consumptionTotal: number
 }
 
 export interface SessionResult {
@@ -22,6 +25,8 @@ export interface SessionResult {
   consumptionTotal: number
   total: number
   saleId: string | null
+  startedAtUtc: string
+  endedAtUtc: string | null
 }
 
 
@@ -125,6 +130,8 @@ export interface ReportMetrics {
   salesByDay: Array<{ date: string; amount: number }>
   salesByEmployee: Array<{ userId: string; employeeName: string; amount: number; salesCount: number }>
   salesByProduct: Array<{ productId: string | null; productName: string; quantity: number; revenue: number; cost: number; grossProfit: number }>
+  salesByHour: Array<{ hour: number; amount: number; salesCount: number }>
+  billiardByTable: Array<{ tableId: string; tableName: string; hours: number; sessions: number }>
 }
 export interface ReportResponse {
   from: string
@@ -153,4 +160,6 @@ export interface SaleDetailResponse {
   billiardMinutes: number | null
   items: Array<{ description: string; quantity: number; unitPrice: number; subtotal: number; itemType: string }>
   payments: Array<{ method: string; amount: number }>
+  billiardStartedAt: string | null
+  billiardEndedAt: string | null
 }

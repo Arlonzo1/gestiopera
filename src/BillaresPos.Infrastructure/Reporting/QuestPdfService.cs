@@ -1,3 +1,4 @@
+using BillaresPos.Application.Common;
 using BillaresPos.Application.Common.Abstractions;
 using QuestPDF.Fluent;
 using QuestPDF.Helpers;
@@ -29,6 +30,9 @@ public sealed class QuestPdfService : IPdfService
                 column.Item().Text($"Fecha: {model.CreatedAt:dd/MM/yyyy HH:mm}");
                 column.Item().Text($"Cajero: {model.CashierName}");
                 if (!string.IsNullOrWhiteSpace(model.CustomerName)) column.Item().Text($"A nombre de: {model.CustomerName}");
+                if (!string.IsNullOrWhiteSpace(model.TableName)) column.Item().Text($"Mesa: {model.TableName}");
+                if (model.BilliardStartedAt is not null) column.Item().Text($"Hora de inicio: {model.BilliardStartedAt:dd/MM/yyyy HH:mm}");
+                if (model.BilliardEndedAt is not null) column.Item().Text($"Hora de finalización: {model.BilliardEndedAt:dd/MM/yyyy HH:mm}");
                 column.Item().LineHorizontal(1);
 
                 column.Item().Table(table =>
@@ -49,8 +53,8 @@ public sealed class QuestPdfService : IPdfService
                     });
                     foreach (var item in model.Items)
                     {
-                        table.Cell().Text(item.IsBilliardTime ? $"{item.Description} (tiempo)": item.Description);
-                        table.Cell().AlignRight().Text(item.Quantity.ToString("0.###"));
+                        table.Cell().Text(item.Description);
+                        table.Cell().AlignRight().Text(ColombianFormat.Number(item.Quantity, "0.###"));
                         table.Cell().AlignRight().Text(Money(item.UnitPrice, model.Currency));
                         table.Cell().AlignRight().Text(Money(item.Subtotal, model.Currency));
                     }
@@ -110,7 +114,7 @@ public sealed class QuestPdfService : IPdfService
             AddRow(table, "Costo de ventas", Money(metrics.CostOfGoodsSold, currency), "Utilidad bruta", Money(metrics.GrossProfit, currency));
             AddRow(table, "Gastos", Money(metrics.Expenses, currency), "Resultado operativo", Money(metrics.OperatingResult, currency));
             AddRow(table, "Efectivo", Money(metrics.CashPayments, currency), "Electrónico", Money(metrics.ElectronicPayments, currency));
-            AddRow(table, "Horas de billar", metrics.BilliardHours.ToString("0.##"), "Ventas canceladas", metrics.CancelledSales.ToString());
+            AddRow(table, "Horas de billar", ColombianFormat.Number(metrics.BilliardHours, "0.##"), "Ventas canceladas", metrics.CancelledSales.ToString());
         });
     }
 
@@ -118,9 +122,9 @@ public sealed class QuestPdfService : IPdfService
     {
         table.Cell().Text(label1);
         table.Cell().AlignRight().Text(value1).Bold();
-        table.Cell().Text(label2);
+        table.Cell().PaddingLeft(24).Text(label2);
         table.Cell().AlignRight().Text(value2).Bold();
     }
 
-    private static string Money(decimal value, string currency) => $"{currency} {value:N0}";
+    private static string Money(decimal value, string currency) => $"{currency} {ColombianFormat.Number(value)}";
 }

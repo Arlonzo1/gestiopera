@@ -18,7 +18,7 @@ export default function LoginPage() {
   }
 
   return <main className="login-shell">
-    <section className="login-panel">
+    <section className="login-side"><div className="login-panel">
       <div className="brand-mark"><ShieldCheck size={22} /></div>
       <p className="eyebrow">BILLARES POS</p>
       <h1>Control operativo del establecimiento</h1>
@@ -29,6 +29,11 @@ export default function LoginPage() {
         {error && <div className="error-box">{error}</div>}
         <button className="primary-button" disabled={loading}><LogIn size={17} />{loading ? 'Ingresando...' : 'Ingresar'}</button>
       </form>
-    </section>
+    </div></section>
+    <aside className="login-visual">
+      <img src="/login-billar.jpg" alt="Bolas de billar ordenadas sobre una mesa de paño azul" />
+      <div className="login-visual-text"><p>Mesas · Consumos · Caja</p><strong>Todo tu billar en un solo lugar.</strong></div>
+      <a className="photo-credit" href="https://commons.wikimedia.org/wiki/File:DSCF0497_Rack_em_up_a_colorful_set_of_billiard_balls_ready_for_a_night_of_pool_under_cool_blue_bar_lights.jpg" target="_blank" rel="noreferrer">Foto: PattayaPatrol · CC BY-SA 4.0</a>
+    </aside>
   </main>
 }

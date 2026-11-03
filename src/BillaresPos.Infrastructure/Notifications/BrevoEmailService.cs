@@ -18,7 +18,7 @@ public sealed class BrevoEmailService(
         var apiKey = configuration["Email:BrevoApiKey"];
         var from = configuration["Email:From"];
         if (string.IsNullOrWhiteSpace(apiKey) || string.IsNullOrWhiteSpace(from))
-            throw new InvalidOperationException("Brevo email is enabled but API key or sender is missing.");
+            throw new InvalidOperationException("El correo con Brevo está activado, pero falta la API key o el remitente.");
 
         var request = new BrevoEmailRequest
         {

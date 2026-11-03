@@ -8,6 +8,8 @@ import { getBranding, onBrandingChanged } from '../branding'
 
 type AppLayoutProps = { eyebrow: string; title: string; actions?: ReactNode; children: ReactNode }
 
+const roleLabels: Record<string, string> = { OWNER: 'Propietario', ADMINISTRATOR: 'Administrador', CASHIER: 'Cajero' }
+
 export default function AppLayout({ eyebrow, title, actions, children }: AppLayoutProps) {
   const auth = useAuthStore(state => state.auth)
   const logout = useAuthStore(state => state.logout)
@@ -26,12 +28,12 @@ export default function AppLayout({ eyebrow, title, actions, children }: AppLayo
 
   return <div className="app-frame">
     <aside className={mobileOpen ? 'sidebar mobile-open' : 'sidebar'}>
-      <div className="sidebar-brand">{branding.logoDataUrl ? <img className="brand-logo" src={branding.logoDataUrl} alt="Logo del negocio" /> : <span className="brand-symbol">B</span>}<div><strong>{branding.name}</strong><span>Operacion diaria</span></div></div>
+      <div className="sidebar-brand">{branding.logoDataUrl ? <img className="brand-logo" src={branding.logoDataUrl} alt="Logo del negocio" /> : <span className="brand-symbol">B</span>}<div><strong>{branding.name}</strong><span>Operación diaria</span></div></div>
       <nav className="sidebar-nav" aria-label="Navegación principal" onClick={() => setMobileOpen(false)}>
         <p className="nav-label">Operación</p>
         {canAdminister && <NavLink to="/dashboard" className={navClass}><LayoutDashboard size={18} />Resumen</NavLink>}
         <NavLink to="/pos" className={navClass}><ShoppingCart size={18} />Ventas</NavLink>
-        <NavLink to="/tables" className={navClass}><PanelsTopLeft size={18} />Mesas de billar</NavLink>
+        <NavLink to="/tables" className={navClass}><PanelsTopLeft size={18} />Mesas</NavLink>
         <NavLink to="/cash" className={navClass}><Banknote size={18} />Caja</NavLink>
         <p className="nav-label secondary-label">Inventario</p>
         <NavLink to="/products" className={navClass}><Package size={18} />Productos</NavLink>
@@ -40,7 +42,7 @@ export default function AppLayout({ eyebrow, title, actions, children }: AppLayo
         <NavLink to="/notifications" className={navClass}><Bell size={18} />Notificaciones{(unreadNotifications.data?.length ?? 0) > 0 && <span className="notification-badge">{unreadNotifications.data!.length > 99 ? '99+' : unreadNotifications.data!.length}</span>}</NavLink>
         {canAdminister && <><NavLink to="/reports" className={navClass}><BarChart3 size={18} />Reportes</NavLink><NavLink to="/audit" className={navClass}><History size={18} />Auditoría</NavLink><p className="nav-label secondary-label">Administración</p><NavLink to="/employees" className={navClass}><UserRound size={18} />Empleados</NavLink><NavLink to="/settings" className={navClass}><Settings2 size={18} />Configuración</NavLink></>}
       </nav>
-      <div className="sidebar-user"><div className="avatar">{auth?.user.fullName.slice(0, 1).toUpperCase()}</div><div><strong>{auth?.user.fullName}</strong><span>{auth?.user.roles[0] ?? 'Usuario'}</span></div><button className="icon-button" title="Cerrar sesión" onClick={logout}><LogOut size={17} /></button></div>
+      <div className="sidebar-user"><div className="avatar">{auth?.user.fullName.slice(0, 1).toUpperCase()}</div><div><strong>{auth?.user.fullName}</strong><span>{roleLabels[auth?.user.roles[0] ?? ''] ?? 'Usuario'}</span></div><button className="icon-button" title="Cerrar sesión" onClick={logout}><LogOut size={17} /></button></div>
     </aside>
     {mobileOpen && <button className="mobile-sidebar-backdrop" aria-label="Cerrar menú" onClick={() => setMobileOpen(false)} />}
     <main className="app-main">

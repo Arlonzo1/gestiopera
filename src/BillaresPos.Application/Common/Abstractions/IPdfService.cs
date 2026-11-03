@@ -17,7 +17,10 @@ public sealed record SalesReceiptPdfModel(
     decimal Subtotal,
     decimal Discount,
     decimal Total,
-    IReadOnlyList<SalesReceiptPdfPayment> Payments);
+    IReadOnlyList<SalesReceiptPdfPayment> Payments,
+    string? TableName = null,
+    DateTimeOffset? BilliardStartedAt = null,
+    DateTimeOffset? BilliardEndedAt = null);
 
 public sealed record SalesReceiptPdfItem(
     string Description,

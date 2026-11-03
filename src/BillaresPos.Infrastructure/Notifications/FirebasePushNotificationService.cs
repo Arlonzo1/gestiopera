@@ -20,7 +20,7 @@ public sealed class FirebasePushNotificationService : IPushNotificationService
         var projectId = configuration["Firebase:ProjectId"];
         if (string.IsNullOrWhiteSpace(projectId))
         {
-            throw new InvalidOperationException("Firebase:ProjectId is required when Firebase:Enabled is true.");
+            throw new InvalidOperationException("Firebase:ProjectId es obligatorio cuando Firebase:Enabled está activado.");
         }
 
         var app = FirebaseApp.DefaultInstance ?? FirebaseApp.Create(new AppOptions

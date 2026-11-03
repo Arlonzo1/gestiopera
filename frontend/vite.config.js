@@ -9,7 +9,7 @@ export default defineConfig({
             manifest: {
                 name: 'Billares POS',
                 short_name: 'Billares POS',
-                description: 'Operacion de bares y mesas de billar',
+                description: 'Operación de bares y mesas de billar',
                 theme_color: '#111827',
                 background_color: '#f8fafc',
                 display: 'standalone',

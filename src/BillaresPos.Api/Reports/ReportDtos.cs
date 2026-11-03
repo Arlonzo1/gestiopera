@@ -26,9 +26,13 @@ public sealed record ReportMetrics(
     IReadOnlyList<ReportPaymentRow> PaymentBreakdown,
     IReadOnlyList<ReportDailyRow> SalesByDay,
     IReadOnlyList<ReportEmployeeRow> SalesByEmployee,
-    IReadOnlyList<ReportProductRow> SalesByProduct);
+    IReadOnlyList<ReportProductRow> SalesByProduct,
+    IReadOnlyList<ReportHourRow> SalesByHour,
+    IReadOnlyList<ReportTableRow> BilliardByTable);
 
 public sealed record ReportPaymentRow(PaymentMethod Method, decimal Amount);
 public sealed record ReportDailyRow(DateOnly Date, decimal Amount);
 public sealed record ReportEmployeeRow(Guid UserId, string EmployeeName, decimal Amount, int SalesCount);
+public sealed record ReportHourRow(int Hour, decimal Amount, int SalesCount);
+public sealed record ReportTableRow(Guid TableId, string TableName, decimal Hours, int Sessions);
 public sealed record ReportProductRow(Guid? ProductId, string ProductName, decimal Quantity, decimal Revenue, decimal Cost, decimal GrossProfit);

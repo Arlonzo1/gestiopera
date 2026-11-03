@@ -85,7 +85,7 @@ public static class DashboardEndpoints
         var recentSales = recentSaleEntities.Select(x =>
         {
             var billiardItem = x.Items.FirstOrDefault(item => item.ItemType == SaleItemType.BilliardTime);
-            var tableName = billiardItem?.DescriptionSnapshot.Replace("Billiard time - ", string.Empty).Split(" (")[0];
+            var tableName = billiardItem?.DescriptionSnapshot.Replace("Tiempo de billar - ", string.Empty).Replace("Billiard time - ", string.Empty).Split(" (")[0];
             return new DashboardRecentSale(x.Id, x.SequentialNumber, x.CreatedAt, x.Total, x.Status, x.UserId,
                 tableName, billiardItem is null ? null : (int)billiardItem.Quantity, billiardItem?.Subtotal);
         }).ToList();

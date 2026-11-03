@@ -42,7 +42,9 @@ public sealed record SaleDetailResponse(
     string? TableName,
     int? BilliardMinutes,
     IReadOnlyList<SaleDetailItemResponse> Items,
-    IReadOnlyList<SaleDetailPaymentResponse> Payments);
+    IReadOnlyList<SaleDetailPaymentResponse> Payments,
+    DateTimeOffset? BilliardStartedAt,
+    DateTimeOffset? BilliardEndedAt);
 
 public sealed record SaleDetailItemResponse(
     string Description,

@@ -30,6 +30,17 @@
     ports:
       - "127.0.0.1:8080:8080"
 
+  frontend:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+      args:
+        VITE_API_URL: ""
+    depends_on:
+      - api
+    ports:
+      - "127.0.0.1:5174:80"
+
 volumes:
   postgres_data:
 

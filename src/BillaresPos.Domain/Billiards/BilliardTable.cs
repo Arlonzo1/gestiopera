@@ -9,6 +9,7 @@ public sealed class BilliardTable : ITenantOwned
     public string Name { get; set; } = string.Empty;
     public decimal HourlyRate { get; set; }
     public int BillingIncrementMinutes { get; set; }
+    public BilliardTableKind Kind { get; set; } = BilliardTableKind.Billiard;
     public BilliardTableStatus Status { get; set; } = BilliardTableStatus.Available;
     public bool IsActive { get; set; } = true;
 }

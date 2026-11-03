@@ -38,6 +38,12 @@ public static class BilliardsEndpoints
         var active = await db.BilliardSessions
             .Where(x => x.Status == BilliardSessionStatus.Active)
             .ToDictionaryAsync(x => x.BilliardTableId, ct);
+        var activeSessionIds = active.Values.Select(x => x.Id).ToArray();
+        var consumptionTotals = await db.BilliardConsumptions
+            .Where(x => activeSessionIds.Contains(x.BilliardSessionId))
+            .GroupBy(x => x.BilliardSessionId)
+            .Select(x => new { SessionId = x.Key, Total = x.Sum(item => item.Subtotal) })
+            .ToDictionaryAsync(x => x.SessionId, x => x.Total, ct);
         var tables = await db.BilliardTables.AsNoTracking().Where(x => x.IsActive)
             .OrderBy(x => x.Name).ToListAsync(ct);
 
@@ -46,7 +52,8 @@ public static class BilliardsEndpoints
             active.TryGetValue(table.Id, out var session);
             return new BilliardTableResponse(table.Id, table.Name, table.HourlyRate,
                 table.BillingIncrementMinutes, table.Status, session?.Id,
-                session?.StartedAtUtc, session?.TotalPausedSeconds ?? 0, session?.PausedAtUtc);
+                session?.StartedAtUtc, session?.TotalPausedSeconds ?? 0, session?.PausedAtUtc, table.Kind,
+                session is null ? 0 : consumptionTotals.GetValueOrDefault(session.Id));
         }));
     }
 
@@ -54,76 +61,81 @@ public static class BilliardsEndpoints
         CreateBilliardTableRequest request, AppDbContext db, ICurrentTenant tenant,
         CancellationToken ct)
     {
-        if (tenant.TenantId is null || string.IsNullOrWhiteSpace(request.Name) ||
-            request.HourlyRate < 0 || request.BillingIncrementMinutes <= 0)
+        var isBilliard = request.Kind == BilliardTableKind.Billiard;
+        if (tenant.TenantId is null || string.IsNullOrWhiteSpace(request.Name) || !Enum.IsDefined(request.Kind) ||
+            isBilliard && (request.HourlyRate < 0 || request.BillingIncrementMinutes <= 0))
         {
-            throw new ValidationAppException("Datos de mesa de billar no validos.",
+            throw new ValidationAppException("Datos de mesa de billar no válidos.",
                 new Dictionary<string, string[]> { ["table"] = ["El nombre es obligatorio. La tarifa no puede ser negativa y el incremento debe ser positivo."] });
         }
         var name = request.Name.Trim();
         if (await db.BilliardTables.AnyAsync(x => x.Name == name, ct))
         {
             throw new ValidationAppException("Ya existe una mesa con el mismo nombre.",
-                new Dictionary<string, string[]> { ["name"] = ["El nombre de la mesa debe ser unico dentro del negocio."] });
+                new Dictionary<string, string[]> { ["name"] = ["El nombre de la mesa debe ser único dentro del negocio."] });
         }
         var table = new BilliardTable
         {
-            Id = Guid.NewGuid(), TenantId = tenant.TenantId.Value, Name = name,
-            HourlyRate = request.HourlyRate,
-            BillingIncrementMinutes = request.BillingIncrementMinutes
+            Id = Guid.NewGuid(), TenantId = tenant.TenantId.Value, Name = name, Kind = request.Kind,
+            HourlyRate = isBilliard ? request.HourlyRate : 0,
+            BillingIncrementMinutes = isBilliard ? request.BillingIncrementMinutes : 15
         };
         db.BilliardTables.Add(table);
         await db.SaveChangesAsync(ct);
         return Results.Created($"/api/billiards/tables/{table.Id}",
             new BilliardTableResponse(table.Id, table.Name, table.HourlyRate,
-                table.BillingIncrementMinutes, table.Status, null, null, 0, null));
+                table.BillingIncrementMinutes, table.Status, null, null, 0, null, table.Kind, 0));
     }
 
     private static async Task<IResult> UpdateTableAsync(
         Guid tableId, UpdateBilliardTableRequest request, AppDbContext db,
         ICurrentTenant tenant, CancellationToken ct)
     {
-        if (tenant.TenantId is null || string.IsNullOrWhiteSpace(request.Name) ||
-            request.HourlyRate < 0 || decimal.Truncate(request.HourlyRate) != request.HourlyRate ||
-            request.BillingIncrementMinutes <= 0)
+        if (tenant.TenantId is null || string.IsNullOrWhiteSpace(request.Name))
         {
-            throw new ValidationAppException("Datos de mesa de billar no validos.",
-                new Dictionary<string, string[]> { ["table"] = ["El nombre es obligatorio. La tarifa debe ser un numero entero no negativo y el incremento debe ser positivo."] });
+            throw new ValidationAppException("Datos de mesa de billar no válidos.",
+                new Dictionary<string, string[]> { ["table"] = ["El nombre es obligatorio. La tarifa debe ser un número entero no negativo y el incremento debe ser positivo."] });
         }
 
         var table = await db.BilliardTables.FirstOrDefaultAsync(x => x.Id == tableId && x.IsActive, ct);
-        if (table is null) throw new NotFoundException("No se encontro la mesa de billar.");
+        if (table is null) throw new NotFoundException("No se encontró la mesa de billar.");
+        if (table.Kind == BilliardTableKind.Billiard && (request.HourlyRate < 0 || decimal.Truncate(request.HourlyRate) != request.HourlyRate || request.BillingIncrementMinutes <= 0))
+            throw new ValidationAppException("Datos de mesa de billar no válidos.",
+                new Dictionary<string, string[]> { ["table"] = ["La tarifa debe ser un número entero no negativo y el incremento debe ser positivo."] });
         var name = request.Name.Trim();
         if (await db.BilliardTables.AnyAsync(x => x.Id != tableId && x.Name == name, ct))
         {
             throw new ValidationAppException("Ya existe una mesa con el mismo nombre.",
-                new Dictionary<string, string[]> { ["name"] = ["El nombre de la mesa debe ser unico dentro del negocio."] });
+                new Dictionary<string, string[]> { ["name"] = ["El nombre de la mesa debe ser único dentro del negocio."] });
         }
 
         table.Name = name;
-        table.HourlyRate = request.HourlyRate;
-        table.BillingIncrementMinutes = request.BillingIncrementMinutes;
+        if (table.Kind == BilliardTableKind.Billiard)
+        {
+            table.HourlyRate = request.HourlyRate;
+            table.BillingIncrementMinutes = request.BillingIncrementMinutes;
+        }
         await db.SaveChangesAsync(ct);
         return Results.Ok(new BilliardTableResponse(table.Id, table.Name, table.HourlyRate,
-            table.BillingIncrementMinutes, table.Status, null, null, 0, null));
+            table.BillingIncrementMinutes, table.Status, null, null, 0, null, table.Kind, 0));
     }
     private static async Task<IResult> StartAsync(
         Guid tableId, AppDbContext db, ICurrentTenant tenant, ICurrentUser user,
         IClock clock, IHubContext<BilliardsHub> hub, CancellationToken ct)
     {
         if (tenant.TenantId is null || user.UserId is null)
-            throw new ForbiddenException("An authenticated tenant user is required.");
+            throw new ForbiddenException("Se requiere un usuario autenticado del negocio.");
         if (!await db.CashShifts.AnyAsync(x => x.UserId == user.UserId && x.Status == BillaresPos.Domain.CashManagement.CashShiftStatus.Open, ct))
             throw new ValidationAppException("Debes abrir un turno de caja antes de iniciar una mesa.",
-                new Dictionary<string, string[]> { ["cashShift"] = ["Abre un turno de caja para iniciar la operacion."] });
+                new Dictionary<string, string[]> { ["cashShift"] = ["Abre un turno de caja para iniciar la operación."] });
 
         await using var tx = await db.Database.BeginTransactionAsync(
             System.Data.IsolationLevel.Serializable, ct);
         var table = await db.BilliardTables.FirstOrDefaultAsync(
             x => x.Id == tableId && x.IsActive, ct);
-        if (table is null) throw new NotFoundException("No se encontro la mesa de billar.");
+        if (table is null) throw new NotFoundException("No se encontró la mesa de billar.");
         if (table.Status != BilliardTableStatus.Available)
-            throw new ValidationAppException("La mesa no esta disponible.",
+            throw new ValidationAppException("La mesa no está disponible.",
                 new Dictionary<string, string[]> { ["status"] = ["Solo se pueden iniciar mesas disponibles."] });
 
         var session = new BilliardSession
@@ -140,7 +152,7 @@ public static class BilliardsEndpoints
         await tx.CommitAsync(ct);
         await BroadcastAsync(hub, tenant.TenantId.Value, table, session, ct);
         return Results.Created($"/api/billiards/sessions/{session.Id}",
-            new BilliardSessionResponse(session.Id, table.Id, session.Status, 0, 0, 0, 0, 0, null));
+            new BilliardSessionResponse(session.Id, table.Id, session.Status, 0, 0, 0, 0, 0, null, session.StartedAtUtc, null));
     }
 
     private static async Task<IResult> PauseAsync(
@@ -148,8 +160,10 @@ public static class BilliardsEndpoints
         IHubContext<BilliardsHub> hub, CancellationToken ct)
     {
         var (table, session) = await ActiveTableAsync(tableId, db, ct);
+        if (table.Kind != BilliardTableKind.Billiard)
+            throw new ValidationAppException("Las mesas de bar no se pausan.", new Dictionary<string, string[]>());
         if (table.Status != BilliardTableStatus.Occupied || session.PausedAtUtc is not null)
-            throw new ValidationAppException("La sesion no se puede pausar.", new Dictionary<string, string[]>());
+            throw new ValidationAppException("La sesión no se puede pausar.", new Dictionary<string, string[]>());
         session.PausedAtUtc = clock.UtcNow;
         table.Status = BilliardTableStatus.Paused;
         await db.SaveChangesAsync(ct);
@@ -163,7 +177,7 @@ public static class BilliardsEndpoints
     {
         var (table, session) = await ActiveTableAsync(tableId, db, ct);
         if (table.Status != BilliardTableStatus.Paused || session.PausedAtUtc is null)
-            throw new ValidationAppException("La sesion no se puede reanudar.", new Dictionary<string, string[]>());
+            throw new ValidationAppException("La sesión no se puede reanudar.", new Dictionary<string, string[]>());
         session.TotalPausedSeconds += Math.Max(0,
             (long)(clock.UtcNow - session.PausedAtUtc.Value).TotalSeconds);
         session.PausedAtUtc = null;
@@ -178,14 +192,14 @@ public static class BilliardsEndpoints
         ICurrentTenant tenant, ICurrentUser user, IClock clock, CancellationToken ct)
     {
         if (tenant.TenantId is null || user.UserId is null || request.Quantity <= 0 || decimal.Truncate(request.Quantity) != request.Quantity)
-            throw new ValidationAppException("Consumo de billar no valido.",
+            throw new ValidationAppException("Consumo de billar no válido.",
                 new Dictionary<string, string[]> { ["quantity"] = ["La cantidad debe ser positiva."] });
         var session = await db.BilliardSessions.FirstOrDefaultAsync(
             x => x.Id == sessionId && x.Status == BilliardSessionStatus.Active, ct);
-        if (session is null) throw new NotFoundException("No se encontro la sesion activa de billar.");
+        if (session is null) throw new NotFoundException("No se encontró la sesión activa de billar.");
         var product = await db.Products.FirstOrDefaultAsync(
             x => x.Id == request.ProductId && x.IsActive, ct);
-        if (product is null) throw new NotFoundException("No se encontro el producto.");
+        if (product is null) throw new NotFoundException("No se encontró el producto.");
 
         var consumption = new BilliardConsumption
         {
@@ -205,12 +219,12 @@ public static class BilliardsEndpoints
         Guid sessionId, Guid consumptionId, AppDbContext db, ICurrentTenant tenant, CancellationToken ct)
     {
         if (tenant.TenantId is null)
-            throw new ForbiddenException("An authenticated tenant user is required.");
+            throw new ForbiddenException("Se requiere un usuario autenticado del negocio.");
 
         var consumption = await db.BilliardConsumptions
             .FirstOrDefaultAsync(x => x.Id == consumptionId && x.BilliardSessionId == sessionId && x.TenantId == tenant.TenantId && x.BilliardSession.Status == BilliardSessionStatus.Active, ct);
         if (consumption is null)
-            throw new NotFoundException("No se encontro el consumo en la sesion activa.");
+            throw new NotFoundException("No se encontró el consumo en la sesión activa.");
 
         db.BilliardConsumptions.Remove(consumption);
         await db.SaveChangesAsync(ct);
@@ -223,30 +237,29 @@ public static class BilliardsEndpoints
     {
         if (tenant.TenantId is null || user.UserId is null || request.Payments is null ||
             request.Payments.Count == 0 || request.Payments.Any(x => x.Amount <= 0 || decimal.Truncate(x.Amount) != x.Amount))
-            throw new ValidationAppException("Datos de cierre de billar no validos.",
+            throw new ValidationAppException("Datos de cierre de billar no válidos.",
                 new Dictionary<string, string[]> { ["payments"] = ["Debes registrar al menos un pago con valor positivo."] });
 
         await using var tx = await db.Database.BeginTransactionAsync(
             System.Data.IsolationLevel.Serializable, ct);
         var session = await db.BilliardSessions.Include(x => x.Consumptions)
             .FirstOrDefaultAsync(x => x.Id == sessionId && x.Status == BilliardSessionStatus.Active, ct);
-        if (session is null) throw new NotFoundException("No se encontro la sesion activa de billar.");
+        if (session is null) throw new NotFoundException("No se encontró la sesión activa de billar.");
         var table = await db.BilliardTables.FirstOrDefaultAsync(x => x.Id == session.BilliardTableId, ct);
-        if (table is null) throw new NotFoundException("No se encontro la mesa de billar.");
+        if (table is null) throw new NotFoundException("No se encontró la mesa de billar.");
 
         var ended = clock.UtcNow;
         var pausedSeconds = session.TotalPausedSeconds + (session.PausedAtUtc is null
             ? 0
             : Math.Max(0, (long)(ended - session.PausedAtUtc.Value).TotalSeconds));
         var elapsed = Math.Max(0, (long)(ended - session.StartedAtUtc).TotalSeconds - pausedSeconds);
-        var rawMinutes = elapsed / 60m;
-        var billed = rawMinutes == 0 ? 0 : (int)(Math.Ceiling(rawMinutes / session.BillingIncrementMinutesSnapshot) * session.BillingIncrementMinutesSnapshot);
+        var billed = BilledMinutes(table, session, elapsed);
         var timeCharge = decimal.Round(billed * session.HourlyRateSnapshot / 60m, 2, MidpointRounding.ToEven);
         var consumptionTotal = decimal.Round(session.Consumptions.Sum(x => x.Subtotal), 2);
         var total = decimal.Round(timeCharge + consumptionTotal, 2);
         if (decimal.Round(request.Payments.Sum(x => x.Amount), 2) != total)
-            throw new ValidationAppException("El total recibido no coincide con el total de la sesion de billar.",
-                new Dictionary<string, string[]> { ["payments"] = ["Los valores de los pagos deben ser iguales al total de la sesion."] });
+            throw new ValidationAppException("El total recibido no coincide con el total de la sesión de billar.",
+                new Dictionary<string, string[]> { ["payments"] = ["Los valores de los pagos deben ser iguales al total de la sesión."] });
 
         var productIds = session.Consumptions.Select(x => x.ProductId).Distinct().ToArray();
         var products = await db.Products.Where(x => productIds.Contains(x.Id) && x.IsActive)
@@ -258,7 +271,7 @@ public static class BilliardsEndpoints
         foreach (var pair in quantities)
             if (products[pair.Key].CurrentStock < pair.Value)
                 throw new ValidationAppException("Inventario insuficiente para el consumo de billar.",
-                    new Dictionary<string, string[]> { ["quantity"] = [$"El producto {pair.Key} no tiene inventario suficiente."] });
+                    new Dictionary<string, string[]> { ["quantity"] = [$"{products[pair.Key].Name} no tiene inventario suficiente."] });
 
         var number = (await db.Sales.Select(x => (long?)x.SequentialNumber).MaxAsync(ct) ?? 0) + 1;
         var activeCashShiftId = await db.CashShifts
@@ -277,7 +290,7 @@ public static class BilliardsEndpoints
             sale.Items.Add(new SaleItem
             {
                 Id = Guid.NewGuid(), TenantId = sale.TenantId, SaleId = sale.Id,
-                DescriptionSnapshot = $"Billiard time - {table.Name} ({billed} minutes)",
+                DescriptionSnapshot = $"Tiempo de billar - {table.Name} ({billed} minutos)",
                 Quantity = billed, UnitPrice = decimal.Round(session.HourlyRateSnapshot / 60m, 2),
                 Subtotal = timeCharge, ItemType = SaleItemType.BilliardTime
             });
@@ -318,23 +331,28 @@ public static class BilliardsEndpoints
         await tx.CommitAsync(ct);
         await BroadcastAsync(hub, tenant.TenantId.Value, table, session, ct);
         return Results.Ok(new BilliardSessionResponse(session.Id, table.Id, session.Status,
-            elapsed, billed, timeCharge, consumptionTotal, total, sale.Id));
+            elapsed, billed, timeCharge, consumptionTotal, total, sale.Id, session.StartedAtUtc, session.EndedAtUtc));
     }
 
     private static async Task<IResult> GetSessionAsync(Guid sessionId, AppDbContext db, IClock clock, CancellationToken ct)
     {
         var session = await db.BilliardSessions.Include(x => x.Consumptions).FirstOrDefaultAsync(x => x.Id == sessionId, ct);
-        if (session is null) throw new NotFoundException("No se encontro la sesion de billar.");
+        if (session is null) throw new NotFoundException("No se encontró la sesión de billar.");
         var table = await db.BilliardTables.AsNoTracking().FirstOrDefaultAsync(x => x.Id == session.BilliardTableId, ct);
-        if (table is null) throw new NotFoundException("No se encontro la mesa de billar.");
+        if (table is null) throw new NotFoundException("No se encontró la mesa de billar.");
         var now = session.EndedAtUtc ?? clock.UtcNow;
         var paused = session.TotalPausedSeconds + (session.PausedAtUtc is null ? 0 : Math.Max(0, (long)(now - session.PausedAtUtc.Value).TotalSeconds));
         var elapsed = Math.Max(0, (long)(now - session.StartedAtUtc).TotalSeconds - paused);
-        var rawMinutes = elapsed / 60m;
-        var billed = rawMinutes == 0 ? 0 : (int)(Math.Ceiling(rawMinutes / session.BillingIncrementMinutesSnapshot) * session.BillingIncrementMinutesSnapshot);
+        var billed = BilledMinutes(table, session, elapsed);
         var timeCharge = decimal.Round(billed * session.HourlyRateSnapshot / 60m, 2, MidpointRounding.ToEven);
         var consumptionTotal = decimal.Round(session.Consumptions.Sum(x => x.Subtotal), 2);
-        return Results.Ok(new BilliardSessionDetailResponse(session.Id, table.Id, session.Status, elapsed, billed, timeCharge, consumptionTotal, decimal.Round(timeCharge + consumptionTotal, 2), session.Consumptions.OrderBy(x => x.CreatedAt).Select(x => new BilliardConsumptionResponse(x.Id, x.ProductId, x.DescriptionSnapshot, x.Quantity, x.UnitPrice, x.Subtotal)).ToList()));
+        return Results.Ok(new BilliardSessionDetailResponse(session.Id, table.Id, session.Status, elapsed, billed, timeCharge, consumptionTotal, decimal.Round(timeCharge + consumptionTotal, 2), session.Consumptions.OrderBy(x => x.CreatedAt).Select(x => new BilliardConsumptionResponse(x.Id, x.ProductId, x.DescriptionSnapshot, x.Quantity, x.UnitPrice, x.Subtotal)).ToList(), session.StartedAtUtc, session.EndedAtUtc));
+    }
+
+    private static int BilledMinutes(BilliardTable table, BilliardSession session, long elapsedSeconds)
+    {
+        if (table.Kind != BilliardTableKind.Billiard || elapsedSeconds == 0) return 0;
+        return (int)(Math.Ceiling(elapsedSeconds / 60m / session.BillingIncrementMinutesSnapshot) * session.BillingIncrementMinutesSnapshot);
     }
 
     private static async Task<(BilliardTable Table, BilliardSession Session)> ActiveTableAsync(
@@ -343,7 +361,7 @@ public static class BilliardsEndpoints
         var table = await db.BilliardTables.FirstOrDefaultAsync(x => x.Id == tableId, ct);
         var session = table is null ? null : await db.BilliardSessions.FirstOrDefaultAsync(
             x => x.BilliardTableId == table.Id && x.Status == BilliardSessionStatus.Active, ct);
-        if (table is null || session is null) throw new NotFoundException("No se encontro la sesion activa de billar.");
+        if (table is null || session is null) throw new NotFoundException("No se encontró la sesión activa de billar.");
         return (table, session);
     }
 

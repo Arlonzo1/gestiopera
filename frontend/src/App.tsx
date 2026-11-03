@@ -63,16 +63,16 @@ export default function App() {
 
   return <Routes>
     <Route path="/login" element={auth ? <Navigate to="/tables" replace /> : <LoginPage />} />
-    <Route path="/inventory" element={<ProtectedRoute><InventoryPage /></ProtectedRoute>} />
-    <Route path="/inventory/count" element={<ProtectedRoute><PhysicalCountPage /></ProtectedRoute>} />
-    <Route path="/purchases" element={<ProtectedRoute><PurchasesPage /></ProtectedRoute>} />
+    <Route path="/inventory" element={<ProtectedRoute roles={['OWNER', 'ADMINISTRATOR']}><InventoryPage /></ProtectedRoute>} />
+    <Route path="/inventory/count" element={<ProtectedRoute roles={['OWNER', 'ADMINISTRATOR']}><PhysicalCountPage /></ProtectedRoute>} />
+    <Route path="/purchases" element={<ProtectedRoute roles={['OWNER', 'ADMINISTRATOR']}><PurchasesPage /></ProtectedRoute>} />
     <Route path="/products" element={<ProtectedRoute><ProductsPage /></ProtectedRoute>} />
     <Route path="/pos" element={<ProtectedRoute><PosPage /></ProtectedRoute>} />
     <Route path="/employees" element={<ProtectedRoute roles={['OWNER', 'ADMINISTRATOR']}><EmployeesPage /></ProtectedRoute>} />
     <Route path="/audit" element={<ProtectedRoute roles={['OWNER', 'ADMINISTRATOR']}><AuditPage /></ProtectedRoute>} />
     <Route path="/notifications" element={<ProtectedRoute><NotificationsPage /></ProtectedRoute>} />
     <Route path="/settings" element={<ProtectedRoute roles={['OWNER', 'ADMINISTRATOR']}><SettingsPage /></ProtectedRoute>} />
-    <Route path="/reports" element={<ProtectedRoute><ReportsPage /></ProtectedRoute>} />
+    <Route path="/reports" element={<ProtectedRoute roles={['OWNER', 'ADMINISTRATOR']}><ReportsPage /></ProtectedRoute>} />
     <Route path="/dashboard" element={<ProtectedRoute roles={["OWNER", "ADMINISTRATOR"]}><DashboardPage /></ProtectedRoute>} />
     <Route path="/tables" element={<ProtectedRoute><TablesPage /></ProtectedRoute>} />
     <Route path="/cash" element={<ProtectedRoute><CashPage /></ProtectedRoute>} />

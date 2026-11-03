@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import AppLayout from '../components/AppLayout'
 import { EmptyState, Feedback, Panel, SectionHeading } from '../components/ui'
 import { adjustInventory, createProduct, deactivateProduct, getProducts, updateProduct } from '../api'
+import { useAuthStore } from '../authStore'
 import type { Product } from '../types'
 
 const money = (value: number) => new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 }).format(value)
@@ -11,6 +12,7 @@ const money = (value: number) => new Intl.NumberFormat('es-CO', { style: 'curren
 export default function ProductsPage() {
   const client = useQueryClient()
   const query = useQuery({ queryKey: ['products'], queryFn: getProducts })
+  const canManage = useAuthStore(state => state.auth?.user.roles.some(role => role === 'OWNER' || role === 'ADMINISTRATOR') ?? false)
   const [search, setSearch] = useState('')
   const [status, setStatus] = useState<'all' | 'low' | 'out' | 'ok'>('all')
   const [selected, setSelected] = useState<Product | null>(null)
@@ -54,18 +56,18 @@ export default function ProductsPage() {
         <button className={status === 'low' ? 'inventory-metric warning active' : 'inventory-metric warning'} onClick={() => setStatus('low')}><span>Stock bajo</span><strong>{lowCount}</strong></button>
         <button className={status === 'out' ? 'inventory-metric danger active' : 'inventory-metric danger'} onClick={() => setStatus('out')}><span>Sin stock</span><strong>{outCount}</strong></button>
       </div>
-      <div className="products-layout">
+      <div className={canManage ? 'products-layout' : 'products-layout single'}>
         <Panel className="products-panel">
           <div className="products-toolbar"><SectionHeading eyebrow="CATÁLOGO ACTIVO" title="Productos" icon={<Settings2 size={21} />} /><div className="products-filters"><input aria-label="Buscar producto" placeholder="Buscar por nombre o SKU..." value={search} onChange={event => setSearch(event.target.value)} /><select aria-label="Filtrar productos" value={status} onChange={event => setStatus(event.target.value as typeof status)}><option value="all">Todos los estados</option><option value="ok">Stock normal</option><option value="low">Stock bajo</option><option value="out">Sin stock</option></select></div></div>
           {query.isLoading && <EmptyState>Cargando productos...</EmptyState>}
           {query.isError && <Feedback kind="error">No se pudieron cargar los productos.</Feedback>}
           {!query.isLoading && !query.isError && filtered.length === 0 && <EmptyState>No hay productos para este filtro.</EmptyState>}
-          {!query.isLoading && !query.isError && filtered.length > 0 && <div className="product-table"><div className="product-table-head"><span>Producto</span><span>Existencia</span><span>Precio</span><span>Acciones</span></div>{filtered.map(product => <div className="product-row" key={product.id}><div><strong>{product.name}</strong><span className="muted">{product.sku || 'Sin SKU'} | Costo {money(product.averageCost)}</span></div><span className={product.currentStock <= 0 ? 'stock-critical' : product.currentStock <= product.criticalStock ? 'stock-critical' : product.currentStock <= product.minimumStock ? 'stock-low' : 'stock-ok'}>{product.currentStock <= 0 ? 'Sin stock' : product.currentStock + ' unidades'}</span><strong>{money(product.salePrice)}</strong><div className="row-actions"><button title="Editar producto" onClick={() => setEditProduct(product)}><Pencil size={16} /></button><button title="Ajustar inventario" onClick={() => setSelected(product)}><Settings2 size={16} /></button><button title="Desactivar producto" onClick={() => setConfirmProduct(product)}><Trash2 size={16} /></button></div></div>)}</div>}
+          {!query.isLoading && !query.isError && filtered.length > 0 && <div className="product-table"><div className="product-table-head"><span>Producto</span><span>Existencia</span><span>Precio</span>{canManage && <span>Acciones</span>}</div>{filtered.map(product => <div className="product-row" key={product.id}><div><strong>{product.name}</strong><span className="muted">{product.sku || 'Sin SKU'}{canManage && ` | Costo ${money(product.averageCost)}`}</span></div><span className={product.currentStock <= 0 ? 'stock-critical' : product.currentStock <= product.criticalStock ? 'stock-critical' : product.currentStock <= product.minimumStock ? 'stock-low' : 'stock-ok'}>{product.currentStock <= 0 ? 'Sin stock' : product.currentStock + ' unidades'}</span><strong>{money(product.salePrice)}</strong>{canManage && <div className="row-actions"><button title="Editar producto" onClick={() => setEditProduct(product)}><Pencil size={16} /></button><button title="Ajustar inventario" onClick={() => setSelected(product)}><Settings2 size={16} /></button><button title="Desactivar producto" onClick={() => setConfirmProduct(product)}><Trash2 size={16} /></button></div>}</div>)}</div>}
         </Panel>
-        <Panel className="products-panel product-form-panel">
+        {canManage && <Panel className="products-panel product-form-panel">
           <SectionHeading eyebrow="NUEVO PRODUCTO" title="Agregar producto" icon={<PackagePlus size={21} />} />
           <form className="form-stack compact" onSubmit={submitCreate}><label>Nombre<input name="name" required /></label><label>SKU<input name="sku" /></label><label>Costo unitario (COP)<input name="unitCost" type="number" min="0" step="1" required /></label><label>Precio de venta (COP)<input name="salePrice" type="number" min="0" step="1" required /></label><label>Stock mínimo<input name="minimumStock" type="number" min="0" step="1" defaultValue="10" required /></label><label>Stock crítico<input name="criticalStock" type="number" min="0" step="1" defaultValue="3" required /></label><button className="primary-button"><PackagePlus size={16} />Crear producto</button></form>
-        </Panel>
+        </Panel>}
       </div>
       {editProduct && <ProductEdit product={editProduct} pending={update.isPending} onClose={() => setEditProduct(null)} onSave={(value) => update.mutate({ id: editProduct.id, value })} />}
       {selected && <InventoryAdjust product={selected} onClose={() => setSelected(null)} onSaved={() => { setSelected(null); setMessage('Inventario actualizado'); refresh() }} onError={setError} />}

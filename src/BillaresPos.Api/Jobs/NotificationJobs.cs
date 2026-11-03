@@ -60,14 +60,14 @@ public sealed class NotificationJobs(IServiceScopeFactory scopeFactory, IConfigu
                 var phone = await dbContext.NotificationPreferences.IgnoreQueryFilters()
                     .Where(x => x.TenantId == notification.TenantId && x.UserId == notification.RecipientUserId)
                     .Select(x => x.WhatsAppPhoneNumber).SingleOrDefaultAsync();
-                if (string.IsNullOrWhiteSpace(phone)) throw new InvalidOperationException("WhatsApp recipient phone number is not configured.");
+                if (string.IsNullOrWhiteSpace(phone)) throw new InvalidOperationException("No hay un número de WhatsApp configurado para el destinatario.");
                 var sendReceipt = bool.TryParse(configuration["WhatsApp:SendReceipt"], out var receiptEnabled) && receiptEnabled && notification.ReferenceType == "Sale";
                 if (sendReceipt && notification.ReferenceId is Guid receiptSaleId)
                 {
                     var document = await dbContext.GeneratedDocuments.IgnoreQueryFilters()
                         .SingleOrDefaultAsync(x => x.TenantId == notification.TenantId && x.ReferenceId == receiptSaleId && x.DocumentType == "SALE_RECEIPT");
                     if (document?.Status != BillaresPos.Domain.Reports.GeneratedDocumentStatus.Generated || document.Content is null)
-                        throw new InvalidOperationException("El recibo PDF todavÃ­a no estÃ¡ generado.");
+                        throw new InvalidOperationException("El recibo PDF todavía no está generado.");
                     await whatsAppService.SendDocumentAsync(phone, document.Content, document.FileName, notification.Body);
                 }
                 else

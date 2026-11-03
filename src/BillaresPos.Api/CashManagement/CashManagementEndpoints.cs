@@ -24,7 +24,7 @@ public static class CashManagementEndpoints
 
     private static async Task<IResult> GetCurrentAsync(AppDbContext db, ICurrentUser user, CancellationToken ct)
     {
-        if (user.UserId is null) throw new ForbiddenException("An authenticated user is required.");
+        if (user.UserId is null) throw new ForbiddenException("Se requiere un usuario autenticado.");
         var shift = await db.CashShifts.AsNoTracking()
             .Where(x => x.UserId == user.UserId && x.Status == CashShiftStatus.Open)
             .OrderByDescending(x => x.OpenedAt).FirstOrDefaultAsync(ct);
@@ -51,7 +51,7 @@ public static class CashManagementEndpoints
     private static async Task<IResult> OpenAsync(OpenCashShiftRequest request, AppDbContext db, ICurrentTenant tenant, ICurrentUser user, IClock clock, CancellationToken ct)
     {
         if (tenant.TenantId is null || user.UserId is null || request.OpeningCash < 0)
-            throw new ValidationAppException("Datos de apertura de caja no validos.", new Dictionary<string, string[]> { ["openingCash"] = ["El efectivo inicial no puede ser negativo."] });
+            throw new ValidationAppException("Datos de apertura de caja no válidos.", new Dictionary<string, string[]> { ["openingCash"] = ["El efectivo inicial no puede ser negativo."] });
         if (await db.CashShifts.AnyAsync(x => x.UserId == user.UserId && x.Status == CashShiftStatus.Open, ct))
             throw new ValidationAppException("El usuario ya tiene un turno de caja abierto.", new Dictionary<string, string[]> { ["status"] = ["Cierra el turno actual antes de abrir otro."] });
 
@@ -63,18 +63,18 @@ public static class CashManagementEndpoints
 
     private static async Task<IResult> CloseCurrentAsync(CloseCashShiftRequest request, AppDbContext db, ICurrentUser user, IClock clock, CancellationToken ct)
     {
-        if (user.UserId is null) throw new ForbiddenException("An authenticated user is required.");
+        if (user.UserId is null) throw new ForbiddenException("Se requiere un usuario autenticado.");
         var shiftId = await db.CashShifts.Where(x => x.UserId == user.UserId && x.Status == CashShiftStatus.Open).OrderByDescending(x => x.OpenedAt).Select(x => (Guid?)x.Id).FirstOrDefaultAsync(ct);
-        if (shiftId is null) throw new NotFoundException("No se encontro un turno de caja abierto.");
+        if (shiftId is null) throw new NotFoundException("No se encontró un turno de caja abierto.");
         return await CloseAsync(shiftId.Value, request, db, user, clock, ct);
     }
     private static async Task<IResult> CloseAsync(Guid shiftId, CloseCashShiftRequest request, AppDbContext db, ICurrentUser user, IClock clock, CancellationToken ct)
     {
         if (user.UserId is null || request.CountedCash < 0)
-            throw new ValidationAppException("Datos de cierre de caja no validos.", new Dictionary<string, string[]> { ["countedCash"] = ["El efectivo contado no puede ser negativo."] });
+            throw new ValidationAppException("Datos de cierre de caja no válidos.", new Dictionary<string, string[]> { ["countedCash"] = ["El efectivo contado no puede ser negativo."] });
         await using var tx = await db.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable, ct);
         var shift = await db.CashShifts.FirstOrDefaultAsync(x => x.Id == shiftId && x.UserId == user.UserId && x.Status == CashShiftStatus.Open, ct);
-        if (shift is null) throw new NotFoundException("No se encontro un turno de caja abierto.");
+        if (shift is null) throw new NotFoundException("No se encontró un turno de caja abierto.");
         var summary = await SummaryAsync(shift, db, ct);
         shift.ExpectedCash = summary.ExpectedCash;
         shift.CountedCash = request.CountedCash;
@@ -89,7 +89,7 @@ public static class CashManagementEndpoints
     private static async Task<IResult> CreateExpenseAsync(CreateExpenseRequest request, AppDbContext db, ICurrentTenant tenant, ICurrentUser user, IClock clock, CancellationToken ct)
     {
         if (tenant.TenantId is null || user.UserId is null || request.Amount <= 0 || string.IsNullOrWhiteSpace(request.Category))
-            throw new ValidationAppException("Invalid expense data.", new Dictionary<string, string[]> { ["expense"] = ["Amount must be positive and category is required."] });
+            throw new ValidationAppException("Los datos del gasto no son válidos.", new Dictionary<string, string[]> { ["expense"] = ["El valor debe ser positivo y la categoría es obligatoria."] });
         var shift = await db.CashShifts.FirstOrDefaultAsync(x => x.Status == CashShiftStatus.Open && (x.UserId == user.UserId || user.IsInRole(BillaresPos.Domain.Identity.RoleNames.Owner) || user.IsInRole(BillaresPos.Domain.Identity.RoleNames.Administrator)), ct);
         if (shift is null) throw new ValidationAppException("Debes abrir un turno de caja antes de registrar un gasto.", new Dictionary<string, string[]> { ["cashShift"] = ["Abre un turno de caja antes de registrar un gasto."] });
         var expense = new Expense { Id = Guid.NewGuid(), TenantId = tenant.TenantId.Value, CashShiftId = shift.Id, Amount = request.Amount, PaymentMethod = request.PaymentMethod, Category = request.Category.Trim(), Description = request.Description?.Trim(), CreatedByUserId = user.UserId.Value, CreatedAt = clock.UtcNow };
@@ -100,7 +100,7 @@ public static class CashManagementEndpoints
 
     private static async Task<IResult> GetExpensesAsync(AppDbContext db, ICurrentUser user, CancellationToken ct)
     {
-        if (user.UserId is null) throw new ForbiddenException("An authenticated user is required.");
+        if (user.UserId is null) throw new ForbiddenException("Se requiere un usuario autenticado.");
         var expenses = await db.Expenses.AsNoTracking().Where(x => x.CreatedByUserId == user.UserId).OrderByDescending(x => x.CreatedAt).Take(100).ToListAsync(ct);
         return Results.Ok(expenses.Select(x => new ExpenseResponse(x.Id, x.Amount, x.PaymentMethod, x.Category, x.Description, x.CreatedAt)));
     }

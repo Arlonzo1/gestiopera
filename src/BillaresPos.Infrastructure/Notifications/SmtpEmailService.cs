@@ -12,7 +12,7 @@ public sealed class SmtpEmailService(IConfiguration configuration) : IEmailServi
         var host = configuration["Email:SmtpHost"];
         var from = configuration["Email:From"];
         if (string.IsNullOrWhiteSpace(host) || string.IsNullOrWhiteSpace(from))
-            throw new InvalidOperationException("Email is enabled but SMTP host or sender is missing.");
+            throw new InvalidOperationException("El correo está activado, pero falta el servidor SMTP o el remitente.");
 
         var port = int.TryParse(configuration["Email:SmtpPort"], out var configuredPort) ? configuredPort : 587;
         var enableSsl = !bool.TryParse(configuration["Email:EnableSsl"], out var ssl) || ssl;
