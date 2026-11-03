@@ -1,0 +1,12 @@
+# GestiOpera S.A.S. - Balance General a 31/10/2026 (cifras en COP) - CONFIDENCIAL
+codigo,cuenta,tipo,saldo
+1105,Caja general,Activo,12850000
+1110,Bancos - Cuenta corriente,Activo,86420000
+1305,Clientes nacionales,Activo,23900000
+1435,Inventario de mercancias (bebidas y snacks),Activo,18760000
+1524,Equipo de oficina y mesas de billar,Activo,145000000
+2205,Proveedores nacionales,Pasivo,21340000
+2365,Retencion en la fuente por pagar,Pasivo,3120000
+2505,Salarios por pagar,Pasivo,17800000
+3105,Capital suscrito y pagado,Patrimonio,200000000
+3605,Utilidad del ejercicio,Patrimonio,44670000

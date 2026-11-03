@@ -1,0 +1,3 @@
+equipo,rol,ip,sistema,responsable
+servidor.gestiopera.local,Servidor central,192.168.56.10,Ubuntu Server 24.04 LTS,TI
+pc-admin.gestiopera.local,Cliente administrativo,192.168.56.1,Windows 11,TI

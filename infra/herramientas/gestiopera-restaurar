@@ -1,0 +1,102 @@
+#!/usr/bin/env bash
+# gestiopera-restaurar - Recuperacion desde las copias de seguridad
+#
+#  sudo gestiopera-restaurar listar
+#  sudo gestiopera-restaurar verificar [copia]
+#  sudo gestiopera-restaurar buscar <texto> [copia]
+#  sudo gestiopera-restaurar archivo <ruta-absoluta> [copia] [--destino DIR]
+#  sudo gestiopera-restaurar carpeta <ruta-absoluta> [copia]
+#  sudo gestiopera-restaurar bd [copia] [--si]
+#
+#  [copia] = nombre de la copia (p. ej. gestiopera-20261103-153000); por defecto "ultimo"
+set -Eeuo pipefail
+source /etc/gestiopera/config.sh
+[[ $EUID -eq 0 ]] || { echo "Requiere privilegios: sudo $0 $*" >&2; exit 1; }
+
+LOG="$DIR_LOGS/backup.log"
+log() { echo "$(date '+%F %T') $*" >> "$LOG"; logger -t gestiopera-restaurar -- "$*"; echo "$*"; }
+uso() { sed -n '3,11p' "$0" | sed 's/^# \{0,1\}//'; exit 1; }
+
+ruta_copia() {
+  local c="${1:-ultimo}" d
+  d="$DIR_BACKUPS/$c"
+  [[ -d $d ]] || { echo "No existe la copia '$c'. Use: gestiopera-restaurar listar" >&2; exit 1; }
+  readlink -f "$d"
+}
+
+verificar() {
+  local d="$1"
+  echo "Verificando integridad SHA-256 de $(basename "$d")..."
+  ( cd "$d" && sha256sum -c SHA256SUMS ) || { echo "ERROR: la copia esta danada; no se restaura." >&2; exit 2; }
+}
+
+dentro_de_empresa() {
+  case "$1" in "$RAIZ_EMPRESA"/*) ;; *) echo "Solo se restauran rutas dentro de $RAIZ_EMPRESA" >&2; exit 1;; esac
+}
+
+accion="${1:-}"; shift || true
+case "$accion" in
+  listar)
+    printf '%-28s %8s  %s\n' COPIA TAMANO CONTENIDO
+    for d in $(find "$DIR_BACKUPS" -mindepth 1 -maxdepth 1 -type d -name 'gestiopera-*' | sort); do
+      printf '%-28s %8s  %s\n' "$(basename "$d")" "$(du -sh "$d" | cut -f1)" "$(cd "$d" && ls -1 ./*.gz | sed 's|./||' | paste -sd' ')"
+    done
+    if [[ -L $DIR_BACKUPS/ultimo ]]; then echo "ultimo -> $(basename "$(readlink -f "$DIR_BACKUPS/ultimo")")"; fi
+    ;;
+
+  verificar)
+    verificar "$(ruta_copia "${1:-}")"
+    ;;
+
+  buscar)
+    [[ -n ${1:-} ]] || uso
+    d="$(ruta_copia "${2:-}")"
+    grep -i -- "$1" "$d/MANIFIESTO-empresa.txt" || echo "Sin coincidencias en $(basename "$d")"
+    ;;
+
+  archivo|carpeta)
+    objetivo="${1:-}"; [[ -n $objetivo ]] || uso; shift
+    dentro_de_empresa "$objetivo"
+    copia=""; destino="/"
+    while [[ $# -gt 0 ]]; do
+      case "$1" in
+        --destino) destino="$2"; shift 2;;
+        *) copia="$1"; shift;;
+      esac
+    done
+    d="$(ruta_copia "$copia")"
+    verificar "$d"
+    rel="${objetivo#/}"
+    tar -tzf "$d/empresa.tar.gz" "$rel" >/dev/null 2>&1 || { echo "'$objetivo' no esta en la copia $(basename "$d")" >&2; exit 1; }
+
+    final="${destino%/}/$rel"; [[ $destino == / ]] && final="$objetivo"
+    if [[ -e $final ]]; then
+      respaldo="$final.antes-restauracion-$(date +%Y%m%d%H%M%S)"
+      mv -- "$final" "$respaldo"
+      echo "La version actual se conservo como: $respaldo"
+    fi
+    mkdir -p "$destino"
+    tar --acls --xattrs --numeric-owner -xzpf "$d/empresa.tar.gz" -C "$destino" "$rel"
+    log "RESTAURADO $accion $objetivo desde $(basename "$d") en $final (por ${SUDO_USER:-root})"
+    echo
+    ls -la "$final" 2>/dev/null | head -20
+    if [[ -f $final ]]; then sha256sum "$final"; fi
+    getfacl -p "$final" 2>/dev/null | sed -n '1,12p' || true
+    ;;
+
+  bd)
+    copia=""; si=0
+    for a in "$@"; do [[ $a == --si ]] && si=1 || copia="$a"; done
+    d="$(ruta_copia "$copia")"
+    [[ -f $d/basedatos.sql.gz ]] || { echo "La copia no contiene base de datos" >&2; exit 1; }
+    verificar "$d"
+    if (( ! si )); then
+      read -r -p "Se reemplazara la base de datos $APP_BD con la copia $(basename "$d"). Escriba SI para continuar: " r
+      [[ $r == SI ]] || { echo "Cancelado"; exit 1; }
+    fi
+    gunzip -c "$d/basedatos.sql.gz" | docker exec -i "$APP_CONTENEDOR_BD" psql -q -U "$APP_BD_USUARIO" -d "$APP_BD" >/dev/null
+    log "RESTAURADA base de datos $APP_BD desde $(basename "$d") (por ${SUDO_USER:-root})"
+    ;;
+
+  *) uso ;;
+esac

@@ -1,0 +1,57 @@
+#!/usr/bin/env bash
+# gestiopera-estado - Panel de estado del servidor central (para la demostracion)
+set -uo pipefail
+source /etc/gestiopera/config.sh
+[[ $EUID -eq 0 ]] || { echo "Requiere privilegios: sudo $0" >&2; exit 1; }
+
+V=$'\e[32m'; R=$'\e[31m'; A=$'\e[33m'; N=$'\e[1m'; X=$'\e[0m'
+titulo() { echo; echo "${N}== $* ==${X}"; }
+
+echo "${N}GestiOpera - Servidor central $(hostname) ($SERVIDOR_HOST.$DOMINIO)${X}"
+echo "$(date '+%F %T %Z')  |  $(uptime -p)  |  $(lsb_release -ds 2>/dev/null)"
+
+titulo "Red"
+ip -br -4 addr show | grep -v '^lo' | sed 's/^/  /'
+
+titulo "Servicios"
+for s in ssh named fail2ban auditd ufw cron docker sysstat; do
+  if systemctl is-active --quiet "$s"; then printf '  %-10s %sACTIVO%s\n' "$s" "$V" "$X"
+  else printf '  %-10s %sINACTIVO%s\n' "$s" "$R" "$X"; fi
+done
+
+titulo "Recursos"
+printf '  CPU carga: %s   Memoria: %s   Disco /: %s\n' \
+  "$(cut -d' ' -f1-3 /proc/loadavg)" \
+  "$(free -h | awk '/^Mem:/{print $3" / "$2}')" \
+  "$(df -h / | awk 'NR==2{print $3" / "$2" ("$5")"}')"
+
+titulo "Cortafuegos (UFW)"
+ufw status | sed 's/^/  /'
+
+titulo "Fail2ban - carcel sshd"
+fail2ban-client status sshd 2>/dev/null | sed 's/^/  /'
+
+titulo "Aplicacion GestiOpera"
+if command -v docker >/dev/null 2>&1; then
+  docker ps --format '  {{.Names}}\t{{.Status}}\t{{.Ports}}' 2>/dev/null
+  curl -fsS -m 5 -o /dev/null http://127.0.0.1/ && echo "  ${V}Web disponible:${X} http://$SERVIDOR_HOST.$DOMINIO" || echo "  ${R}Web no responde${X}"
+else
+  echo "  Docker no instalado"
+fi
+
+titulo "Copias de seguridad"
+if [[ -L $DIR_BACKUPS/ultimo ]]; then
+  echo "  Ultima: $(basename "$(readlink -f "$DIR_BACKUPS/ultimo")")   Total: $(find "$DIR_BACKUPS" -mindepth 1 -maxdepth 1 -type d -name 'gestiopera-*' | wc -l)   Retencion: $RETENCION_DIAS dias"
+else
+  echo "  ${A}No hay copias todavia${X}"
+fi
+
+titulo "Ultimos accesos"
+last -n 6 -w -F | sed '/^$/d;/^wtmp/d' | sed 's/^/  /'
+
+titulo "Ultimas lineas del monitor"
+tail -n 3 "$DIR_LOGS/monitor.log" 2>/dev/null | sed 's/^/  /'
+if [[ -s $DIR_LOGS/alertas.log ]]; then
+  titulo "Ultimas alertas"
+  tail -n 5 "$DIR_LOGS/alertas.log" | sed "s/^/  $A/;s/$/$X/"
+fi

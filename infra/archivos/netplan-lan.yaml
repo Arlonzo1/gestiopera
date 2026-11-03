@@ -1,0 +1,13 @@
+# GestiOpera - Red local de la empresa (adaptador Host-Only de VirtualBox)
+# enp0s3 (NAT, DHCP) se mantiene en 50-cloud-init.yaml para salida a Internet
+network:
+  version: 2
+  ethernets:
+    @LAN_IF@:
+      dhcp4: false
+      dhcp6: false
+      addresses:
+        - @LAN_IP@/@LAN_PREFIJO@
+      nameservers:
+        addresses: [@LAN_IP@]
+        search: [@DOMINIO@]

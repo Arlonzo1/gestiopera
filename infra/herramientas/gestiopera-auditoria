@@ -1,0 +1,154 @@
+#!/usr/bin/env bash
+# gestiopera-auditoria - Informe de auditoria de actividades
+#
+#  sudo gestiopera-auditoria <usuario> [--desde hoy|ayer|hora|semana|mes|"<fecha>"] [--guardar]
+#  sudo gestiopera-auditoria --general  [--desde ...] [--guardar]
+#
+#  Reune: ficha de la cuenta, sesiones, autenticaciones SSH, uso de sudo,
+#  comandos ejecutados, accesos a informacion sensible y accesos denegados.
+set -uo pipefail
+source /etc/gestiopera/config.sh
+[[ $EUID -eq 0 ]] || { echo "Requiere privilegios: sudo $0 $*" >&2; exit 1; }
+export LC_ALL=C.UTF-8
+
+U=""; DESDE="semana"; GUARDAR=0; GENERAL=0
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --desde) DESDE="$2"; shift 2;;
+    --guardar) GUARDAR=1; shift;;
+    --general) GENERAL=1; shift;;
+    -h|--help) sed -n '3,9p' "$0"; exit 0;;
+    -*) echo "Opcion desconocida: $1" >&2; exit 1;;
+    *) U="$1"; shift;;
+  esac
+done
+(( GENERAL )) || [[ -n $U ]] || { sed -n '3,9p' "$0"; exit 1; }
+if [[ -n $U ]] && ! id "$U" >/dev/null 2>&1; then echo "No existe el usuario $U" >&2; exit 1; fi
+
+case "$DESDE" in
+  hoy) REF="today 00:00";; ayer) REF="yesterday 00:00";; hora) REF="1 hour ago";;
+  semana) REF="7 days ago";; mes) REF="30 days ago";; *) REF="$DESDE";;
+esac
+J_INICIO="$(date -d "$REF" '+%F %T')" || { echo "Fecha invalida" >&2; exit 1; }
+A_INICIO=( $(date -d "$REF" '+%x %T') )
+
+TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
+SALIDA="$TMP/informe.txt"
+h() { printf '\n%s\n%s\n' "$*" "$(printf '%*s' "${#1}" '' | tr ' ' '=')"; }
+aus() { ausearch "$@" --start "${A_INICIO[@]}" --format text 2>/dev/null | grep "^At " || true; }
+# del_usuario <clave>: eventos donde $U es quien inicio sesion o la identidad usada
+del_usuario() { aus -k "$1" | grep -E "^At [^ ]+ [^ ]+ $U[, ]|acting as $U," || true; }
+nada() { [[ -s $1 ]] && sed 's/^/  /' "$1" || echo "  (sin registros en el periodo)"; }
+
+# Operaciones sobre cadenas de permisos "rwx"
+p_and() { local r="" i; for i in 0 1 2; do if [[ ${1:i:1} != - && ${2:i:1} != - ]]; then r+="${1:i:1}"; else r+=-; fi; done; echo "$r"; }
+p_or()  { local a="${1:----}" r="" i; for i in 0 1 2; do if [[ ${a:i:1} != - ]]; then r+="${a:i:1}"; else r+="${2:i:1}"; fi; done; echo "$r"; }
+
+# efectivos <ruta>: permisos efectivos de $U segun el algoritmo de ACL POSIX
+# (no ejecuta nada como el usuario, asi no contamina su propia auditoria)
+efectivos() {
+  local d="$1" acl dueno grp mask p union="" hubo=0 tipo nombre perm grupos
+  dueno="$(stat -c %U "$d")"; grp="$(stat -c %G "$d")"; grupos=" $(id -nG "$U") "
+  acl="$(getfacl -cpE "$d" 2>/dev/null | grep -vE '^(default:|$)')"
+  mask="$(awk -F: '$1=="mask"{print $3}' <<< "$acl")"; mask="${mask:-rwx}"
+  if [[ $dueno == "$U" ]]; then awk -F: '$1=="user" && $2==""{print $3}' <<< "$acl"; return; fi
+  p="$(awk -F: -v u="$U" '$1=="user" && $2==u{print $3}' <<< "$acl")"
+  if [[ -n $p ]]; then p_and "$p" "$mask"; return; fi
+  while IFS=: read -r tipo nombre perm; do
+    [[ $tipo == group ]] || continue
+    [[ -z $nombre ]] && nombre="$grp"
+    if [[ $grupos == *" $nombre "* ]]; then hubo=1; union="$(p_or "$union" "$perm")"; fi
+  done <<< "$acl"
+  if (( hubo )); then p_and "$union" "$mask"; return; fi
+  awk -F: '$1=="other"{print $3}' <<< "$acl"
+}
+
+informe_usuario() {
+  local uid; uid="$(id -u "$U")"
+  echo "######################################################################"
+  echo "  GestiOpera - INFORME DE AUDITORIA DEL USUARIO: $U"
+  echo "  Periodo: desde $J_INICIO   Generado: $(date '+%F %T')   Por: ${SUDO_USER:-root}"
+  echo "######################################################################"
+
+  h "1. Ficha de la cuenta"
+  getent passwd "$U" | awk -F: '{printf "  Usuario: %s  UID: %s  Nombre: %s  Shell: %s\n",$1,$3,$5,$7}'
+  echo "  Grupos: $(id -nG "$U" | tr ' ' ',')"
+  echo "  Estado: $(passwd -S "$U" | awk '{print $2" (ultimo cambio "$3")"}')"
+  chage -l "$U" | sed 's/^/  /'
+  echo "  Carpetas a las que tiene acceso (permisos efectivos POSIX + ACL):"
+  local raiz; raiz="$(efectivos "$RAIZ_EMPRESA")"
+  for d in "$RAIZ_EMPRESA"/*/; do
+    d="${d%/}"
+    local e; e="$(efectivos "$d")"
+    if [[ ${raiz:2:1} != x || ${e:0:1} != r || ${e:2:1} != x ]]; then p="SIN ACCESO"
+    elif [[ ${e:1:1} == w ]]; then p="LECTURA/ESCRITURA"
+    else p="SOLO LECTURA"; fi
+    printf '    %-34s %-18s (%s)\n' "$d" "$p" "$e"
+  done
+
+  h "2. Sesiones (last)"
+  last -F -w "$U" --since "$J_INICIO" 2>/dev/null | sed '/^$/d;/^wtmp/d' > "$TMP/last"; nada "$TMP/last"
+
+  h "3. Autenticaciones SSH (aceptadas y fallidas)"
+  journalctl -u ssh --since "$J_INICIO" --no-pager -q -o short-iso 2>/dev/null \
+    | grep -E "(Accepted [a-z]+ for|Failed password for|Invalid user|session (opened|closed) for user) $U( |\(|$)|user=$U\b" \
+    | sed -E 's/ sshd\[[0-9]+\]//' > "$TMP/ssh" || true
+  nada "$TMP/ssh"
+
+  h "4. Uso de sudo"
+  journalctl _COMM=sudo --since "$J_INICIO" --no-pager -q -o short-iso 2>/dev/null | grep -E "sudo\[[0-9]+\]: +$U " > "$TMP/sudo" || true
+  nada "$TMP/sudo"
+
+  h "5. Comandos ejecutados (auditd, clave comandos_usuarios)"
+  del_usuario comandos_usuarios     | grep -vE 'executed /usr/(lib|libexec)/|executed /usr/bin/(dircolors|lesspipe|basename|dirname|groups|locale|tput|run-parts)' > "$TMP/cmd" || true
+  echo "  Total: $(wc -l < "$TMP/cmd")  (se muestran los ultimos 40)"
+  tail -n 40 "$TMP/cmd" > "$TMP/cmd40"; nada "$TMP/cmd40"
+
+  h "6. Accesos a informacion sensible (Contabilidad y Gerencia)"
+  { del_usuario acceso_contabilidad; del_usuario acceso_gerencia; } | grep -v " unsuccessfully " | sort -s -k3,3 -k2,2 | uniq > "$TMP/sens" || true
+  tail -n 30 "$TMP/sens" > "$TMP/sens30"; nada "$TMP/sens30"
+
+  h "7. Intentos de acceso DENEGADOS"
+  { del_usuario acceso_denegado; del_usuario acceso_contabilidad; del_usuario acceso_gerencia; } | grep ' unsuccessfully ' | sort -s -k3,3 -k2,2 | uniq | grep -vE '(opened-file|changed-directory|created|truncated) /(proc|sys|dev|run|usr|etc/ssl)' > "$TMP/den" || true
+  echo "  Total: $(wc -l < "$TMP/den")"
+  tail -n 30 "$TMP/den" > "$TMP/den30"; nada "$TMP/den30"
+
+  h "8. Cambios en carpetas departamentales"
+  { del_usuario cambios_ventas; del_usuario cambios_ti; } | tail -n 20 > "$TMP/camb"
+  nada "$TMP/camb"
+
+  h "Resumen"
+  printf '  Sesiones: %s | Fallos SSH: %s | Comandos: %s | Accesos sensibles: %s | Denegados: %s\n' \
+    "$(grep -c . "$TMP/last" || true)" "$(grep -cE 'Failed|Invalid' "$TMP/ssh" || true)" \
+    "$(wc -l < "$TMP/cmd")" "$(wc -l < "$TMP/sens")" "$(wc -l < "$TMP/den")"
+}
+
+informe_general() {
+  echo "######################################################################"
+  echo "  GestiOpera - INFORME GENERAL DE AUDITORIA"
+  echo "  Periodo: desde $J_INICIO   Generado: $(date '+%F %T')"
+  echo "######################################################################"
+  h "1. Resumen de auditd (aureport)"
+  aureport --summary -i --start "${A_INICIO[@]}" 2>/dev/null | sed 's/^/  /'
+  h "2. Autenticaciones (aureport -au)"
+  aureport -au -i --start "${A_INICIO[@]}" 2>/dev/null | tail -n 25 | sed 's/^/  /'
+  h "3. Inicios de sesion fallidos"
+  aureport -l --failed -i --start "${A_INICIO[@]}" 2>/dev/null | tail -n 20 | sed 's/^/  /'
+  h "4. Actividad por usuario (eventos auditd por login uid)"
+  ausearch --start "${A_INICIO[@]}" -k comandos_usuarios -i 2>/dev/null | grep -oE ' auid=[^ ]+' | sort | uniq -c | sort -rn | sed 's/^/  /'
+  h "5. Accesos denegados por usuario"
+  { aus -k acceso_denegado; aus -k acceso_contabilidad; aus -k acceso_gerencia; } | grep ' unsuccessfully ' | sort -u | awk '{print $4}' | tr -d ',' | sort | uniq -c | sort -rn | sed 's/^/  /'
+  h "6. Ultimos accesos al sistema"
+  last -F -w --since "$J_INICIO" 2>/dev/null | sed '/^$/d;/^wtmp/d' | head -n 25 | sed 's/^/  /'
+}
+
+if (( GENERAL )); then informe_general > "$SALIDA"; NOMBRE="auditoria-general"; else informe_usuario > "$SALIDA"; NOMBRE="auditoria-$U"; fi
+cat "$SALIDA"
+
+if (( GUARDAR )); then
+  dest="$DIR_INFORMES/$NOMBRE-$(date +%Y%m%d-%H%M%S).txt"
+  install -m 0640 -o root -g ti "$SALIDA" "$dest"
+  sha256sum "$dest" >> "$DIR_INFORMES/SHA256SUMS"
+  echo
+  echo "Informe guardado en $dest (SHA-256 registrado en $DIR_INFORMES/SHA256SUMS)"
+fi

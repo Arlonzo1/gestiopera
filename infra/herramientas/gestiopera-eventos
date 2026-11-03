@@ -1,0 +1,120 @@
+#!/usr/bin/env bash
+# gestiopera-eventos - Deteccion de eventos sospechosos en los registros del servidor
+#
+#  sudo gestiopera-eventos [--desde hoy|ayer|hora|reciente|semana|mes|"<fecha>"] [--guardar]
+#
+#  Fuentes: journal de ssh y sudo, fail2ban, auditd (accesos denegados, cambios
+#  de identidad y privilegios) y alertas del monitor.
+set -uo pipefail
+source /etc/gestiopera/config.sh
+[[ $EUID -eq 0 ]] || { echo "Requiere privilegios: sudo $0 $*" >&2; exit 1; }
+export LC_ALL=C.UTF-8
+
+DESDE="hoy"; GUARDAR=0
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --desde) DESDE="$2"; shift 2;;
+    --guardar) GUARDAR=1; shift;;
+    -h|--help) sed -n '3,7p' "$0"; exit 0;;
+    *) echo "Opcion desconocida: $1" >&2; exit 1;;
+  esac
+done
+case "$DESDE" in
+  hoy) REF="today 00:00";; ayer) REF="yesterday 00:00";; hora) REF="1 hour ago";;
+  reciente) REF="10 minutes ago";; semana) REF="7 days ago";; mes) REF="30 days ago";;
+  *) REF="$DESDE";;
+esac
+J_INICIO="$(date -d "$REF" '+%F %T')" || { echo "Fecha invalida: $DESDE" >&2; exit 1; }
+A_INICIO=( $(date -d "$REF" '+%x %T') )
+
+TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
+SALIDA="$TMP/informe.txt"
+sospechas=()
+
+h() { printf '\n%s\n%s\n' "$*" "$(printf '%*s' "${#1}" '' | tr ' ' '-')"; }
+aus() { ausearch "$@" --start "${A_INICIO[@]}" --format text 2>/dev/null | grep "^At " || true; }
+
+{
+echo "=================================================================="
+echo " GestiOpera - Informe de eventos de seguridad"
+echo " Servidor: $(hostname)   Periodo: desde $J_INICIO   Generado: $(date '+%F %T')"
+echo "=================================================================="
+
+# 1. SSH --------------------------------------------------------------
+journalctl -u ssh --since "$J_INICIO" --no-pager -q -o short-iso > "$TMP/ssh" 2>/dev/null || true
+grep -E 'Failed password|Invalid user|authentication failure|maximum authentication attempts|not allowed because' "$TMP/ssh" > "$TMP/ssh_fallos" || true
+n_fallos=$(wc -l < "$TMP/ssh_fallos")
+
+h "1. Intentos de autenticacion SSH fallidos: $n_fallos"
+if (( n_fallos > 0 )); then
+  echo "Por direccion IP de origen:"
+  grep -oE '(from|rhost=) ?[0-9a-fA-F:.]+' "$TMP/ssh_fallos" | sed -E 's/^(from|rhost=) ?//' | sort | uniq -c | sort -rn | sed 's/^/   /'
+  echo "Por usuario intentado:"
+  { grep -oE 'Failed password for (invalid user )?[^ ]+' "$TMP/ssh_fallos" | awk '{print $NF}'
+    grep -oE 'Invalid user [^ ]+' "$TMP/ssh_fallos" | awk '{print $3}'
+    grep -oE 'User [^ ]+ from [^ ]+ not allowed' "$TMP/ssh_fallos" | awk '{print $2}'; } | sort | uniq -c | sort -rn | sed 's/^/   /'
+  echo "Ultimos registros:"
+  tail -n 8 "$TMP/ssh_fallos" | sed 's/^/   /'
+  (( n_fallos >= 3 )) && sospechas+=("$n_fallos intentos SSH fallidos (posible fuerza bruta)")
+  grep -q 'Invalid user' "$TMP/ssh_fallos" && sospechas+=("intentos con usuarios inexistentes (enumeracion de cuentas)")
+fi
+
+h "2. Inicios de sesion SSH exitosos"
+grep -E 'Accepted (password|publickey)' "$TMP/ssh" | sed -E 's/.*sshd\[[0-9]+\]: //' | awk '{print "   "$0}' | tail -n 10 || true
+[[ -s $TMP/ssh ]] && grep -qE 'Accepted' "$TMP/ssh" || echo "   (ninguno)"
+
+# 2. fail2ban ---------------------------------------------------------
+h "3. Bloqueos automaticos (fail2ban)"
+awk -v d="$J_INICIO" 'substr($0,1,19) >= d' /var/log/fail2ban.log 2>/dev/null | grep -E '\] (Ban|Unban|Restore Ban) ' | sed 's/^/   /' > "$TMP/f2b" || true
+if [[ -s $TMP/f2b ]]; then cat "$TMP/f2b"; sospechas+=("fail2ban bloqueo IPs atacantes"); else echo "   (sin bloqueos en el periodo)"; fi
+echo "   Estado actual: $(fail2ban-client status sshd 2>/dev/null | grep -E 'Currently banned|Banned IP' | tr -s '\t ' ' ' | paste -sd';')"
+
+# 3. sudo -------------------------------------------------------------
+h "4. Uso indebido de privilegios (sudo)"
+journalctl _COMM=sudo --since "$J_INICIO" --no-pager -q -o short-iso 2>/dev/null \
+  | grep -E 'incorrect password|NOT in sudoers|authentication failure|command not allowed' > "$TMP/sudo" || true
+if [[ -s $TMP/sudo ]]; then sed 's/^/   /' "$TMP/sudo" | tail -n 10; sospechas+=("$(wc -l < "$TMP/sudo") intentos de sudo fallidos o no autorizados"); else echo "   (sin intentos fallidos)"; fi
+
+# 4. auditd: accesos denegados ---------------------------------------
+h "5. Intentos de acceso a carpetas sin permiso (auditd)"
+{ aus -k acceso_denegado; aus -k acceso_contabilidad; aus -k acceso_gerencia; } | grep ' unsuccessfully ' | sort -s -k3,3 -k2,2 | uniq | grep -vE '(opened-file|changed-directory) /(proc|sys|dev|run|var/lib|usr|etc/ssl|root/\.manpath)' > "$TMP/denegados" || true
+if [[ -s $TMP/denegados ]]; then
+  echo "Por usuario:"
+  awk '{print $4}' "$TMP/denegados" | tr -d ',' | sort | uniq -c | sort -rn | sed 's/^/   /'
+  echo "Ultimos intentos:"
+  tail -n 10 "$TMP/denegados" | sed 's/^/   /'
+  sospechas+=("$(wc -l < "$TMP/denegados") intentos de acceso a informacion restringida")
+else
+  echo "   (ninguno)"
+fi
+
+# 5. Cambios de identidad y privilegios -------------------------------
+h "6. Cambios en cuentas, grupos, sudoers o configuracion SSH (auditd)"
+{ aus -k identidad; aus -k sudoers; aus -k ssh_config; } | sort -u | tail -n 12 > "$TMP/cambios"
+if [[ -s $TMP/cambios ]]; then sed 's/^/   /' "$TMP/cambios"; else echo "   (sin cambios)"; fi
+
+# 6. Monitor ----------------------------------------------------------
+h "7. Alertas del monitor (ultimas)"
+if [[ -s $DIR_LOGS/alertas.log ]]; then tail -n 5 "$DIR_LOGS/alertas.log" | sed 's/^/   /'; else echo "   (sin alertas)"; fi
+
+# Veredicto -----------------------------------------------------------
+echo
+echo "=================================================================="
+if (( ${#sospechas[@]} )); then
+  echo " RESULTADO: SE DETECTARON EVENTOS SOSPECHOSOS"
+  for s in "${sospechas[@]}"; do echo "   * $s"; done
+  echo
+  echo " Siguiente paso: sudo gestiopera-incidente nuevo \"<titulo>\" Alta"
+else
+  echo " RESULTADO: sin eventos sospechosos en el periodo"
+fi
+echo "=================================================================="
+} > "$SALIDA"
+
+cat "$SALIDA"
+if (( GUARDAR )); then
+  dest="$DIR_INFORMES/eventos-$(date +%Y%m%d-%H%M%S).txt"
+  install -m 0640 -o root -g ti "$SALIDA" "$dest"
+  sha256sum "$dest" >> "$DIR_INFORMES/SHA256SUMS"
+  echo "Informe guardado en $dest"
+fi

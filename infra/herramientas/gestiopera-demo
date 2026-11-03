@@ -1,0 +1,98 @@
+#!/usr/bin/env bash
+# gestiopera-demo - Guion de las cuatro pruebas de la sustentacion
+#
+#  sudo gestiopera-demo              # las 4 pruebas, con pausas
+#  sudo gestiopera-demo 2            # solo la prueba 2 (1=seguridad 2=continuidad 3=acceso 4=auditoria)
+#  sudo gestiopera-demo --auto       # sin pausas (registro en /var/log/gestiopera/demo.log)
+set -uo pipefail
+source /etc/gestiopera/config.sh
+[[ $EUID -eq 0 ]] || { echo "Requiere privilegios: sudo $0 $*" >&2; exit 1; }
+
+AUTO=0; PRUEBAS=()
+for a in "$@"; do case "$a" in --auto) AUTO=1;; [1-4]) PRUEBAS+=("$a");; *) sed -n '3,6p' "$0"; exit 1;; esac; done
+(( ${#PRUEBAS[@]} )) || PRUEBAS=(1 2 3 4)
+(( AUTO )) && exec > >(tee -a "$DIR_LOGS/demo.log") 2>&1
+
+N=$'\e[1m'; V=$'\e[32m'; R=$'\e[31m'; C=$'\e[36m'; X=$'\e[0m'
+ARCHIVO="$RAIZ_EMPRESA/contabilidad/balance_general_2026.csv"
+VENTAS="${VENTAS_USR:-vendedor1}"
+
+banner() { echo; echo "${N}################################################################${X}"; echo "${N}#  $*${X}"; echo "${N}################################################################${X}"; }
+cmd()    { echo; echo "${C}\$ $*${X}"; bash -c "$*"; return 0; }
+como()   { local u="$1"; shift; echo; echo "${C}[$u]\$ $*${X}"; sudo -u "$u" bash -c "cd /tmp; $*"; local rc=$?; return $rc; }
+pausa()  { (( AUTO )) && return 0; echo; read -r -p "${N}>> ENTER para continuar...${X} " _; }
+ok()     { echo "${V}[CUMPLE] $*${X}"; }
+falla()  { echo "${R}[NO CUMPLE] $*${X}"; }
+
+prueba1() {
+  banner "PRUEBA 1 - SEGURIDAD: identificar un evento sospechoso en los registros"
+  echo "Desde el PC cliente (Windows) se simula un ataque de fuerza bruta al SSH:"
+  echo "   PowerShell>  .\\infra\\cliente-windows\\simular-ataque.ps1"
+  echo "   (o manualmente: ssh intruso@$LAN_IP  y escribir claves incorrectas)"
+  pausa
+  cmd "journalctl -u ssh --since '-1 hour' --no-pager -q | grep -E 'Failed password|Invalid user|not allowed because' | tail -n 8"
+  cmd "fail2ban-client status sshd"
+  cmd "gestiopera-eventos --desde hora --guardar"
+  local fallos; fallos="$(journalctl -u ssh --since '-1 hour' --no-pager -q | grep -cE 'Failed password|Invalid user|not allowed because')"
+  if (( fallos > 0 )); then
+    ok "El evento sospechoso fue identificado en los registros (journal/auth.log + fail2ban + informe)."
+  else
+    falla "No hay intentos fallidos en la ultima hora: ejecute primero la simulacion desde el cliente."
+  fi
+  pausa
+}
+
+prueba2() {
+  banner "PRUEBA 2 - CONTINUIDAD: recuperar un archivo empresarial desde la copia"
+  cmd "ls -l '$ARCHIVO' && sha256sum '$ARCHIVO'"
+  local antes; antes="$(sha256sum "$ARCHIVO" 2>/dev/null | cut -d' ' -f1)"
+  echo; echo "1) Se ejecuta una copia de seguridad:"
+  cmd "gestiopera-backup | tail -n 4"
+  pausa
+  echo "2) DESASTRE: el archivo se borra (error humano / ransomware)."
+  cmd "rm -f '$ARCHIVO'; ls -l '$RAIZ_EMPRESA/contabilidad/'"
+  cmd "cat '$ARCHIVO'"
+  pausa
+  echo "3) RECUPERACION desde la ultima copia (se verifica SHA-256 antes de restaurar):"
+  cmd "gestiopera-restaurar archivo '$ARCHIVO'"
+  local despues; despues="$(sha256sum "$ARCHIVO" 2>/dev/null | cut -d' ' -f1)"
+  cmd "head -n 5 '$ARCHIVO'"
+  echo; echo "SHA-256 antes:   $antes"; echo "SHA-256 despues: $despues"
+  if [[ -n $antes && $antes == "$despues" ]]; then ok "Archivo recuperado identico al original, con sus permisos y ACL."; else falla "El archivo restaurado no coincide."; fi
+  pausa
+}
+
+prueba3() {
+  banner "PRUEBA 3 - CONTROL DE ACCESO: Ventas no puede leer Contabilidad"
+  cmd "ls -ld $RAIZ_EMPRESA/*"
+  cmd "getfacl -p $RAIZ_EMPRESA/contabilidad"
+  cmd "id $VENTAS; id contador1; id gerente1"
+  pausa
+  echo; echo "${N}Usuario de VENTAS ($VENTAS) intenta entrar a Contabilidad:${X}"
+  como "$VENTAS" "ls $RAIZ_EMPRESA/contabilidad"
+  como "$VENTAS" "cat $ARCHIVO"; local rc=$?
+  como "$VENTAS" "cp $ARCHIVO /tmp/robado.csv"
+  como "$VENTAS" "echo hack > $RAIZ_EMPRESA/contabilidad/nuevo.txt"
+  echo; echo "${N}Contador (contabilidad) si puede; Gerencia solo puede leer:${X}"
+  como contador1 "head -n 3 $ARCHIVO"
+  como gerente1 "head -n 3 $ARCHIVO"
+  como gerente1 "touch $RAIZ_EMPRESA/contabilidad/gerente.txt"
+  echo; echo "${N}Ventas si trabaja en su propia carpeta:${X}"
+  como "$VENTAS" "ls -l $RAIZ_EMPRESA/ventas | head -n 4"
+  if (( rc != 0 )); then ok "$VENTAS recibio 'Permiso denegado' en Contabilidad (y el intento quedo auditado)."; else falla "$VENTAS pudo leer Contabilidad"; fi
+  echo; echo "Prueba en vivo desde el cliente:  ssh $VENTAS@$LAN_IP   y luego   cat $ARCHIVO"
+  pausa
+}
+
+prueba4() {
+  banner "PRUEBA 4 - AUDITORIA: registros de las actividades de un usuario"
+  cmd "gestiopera-auditoria $VENTAS --desde hoy --guardar"
+  pausa
+  cmd "ausearch -k acceso_denegado --start today --format text 2>/dev/null | grep -E 'acting as $VENTAS|^At [^ ]+ [^ ]+ $VENTAS ' | tail -n 5"
+  cmd "tail -n 5 /var/log/sudo.log"
+  cmd "ls -l $DIR_INFORMES | tail -n 5"
+  ok "Informe de auditoria generado y guardado con su huella SHA-256."
+}
+
+for p in "${PRUEBAS[@]}"; do "prueba$p"; done
+echo; echo "${N}Fin de la demostracion.${X}"

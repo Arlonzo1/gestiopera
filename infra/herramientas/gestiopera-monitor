@@ -1,0 +1,65 @@
+#!/usr/bin/env bash
+# gestiopera-monitor - Chequeo de salud y seguridad (cron cada 5 minutos)
+# Escribe una linea en /var/log/gestiopera/monitor.log y, si algo supera los
+# umbrales, una alerta en alertas.log y en syslog (etiqueta gestiopera-alerta).
+set -uo pipefail
+source /etc/gestiopera/config.sh
+[[ $EUID -eq 0 ]] || { echo "Requiere privilegios: sudo $0" >&2; exit 1; }
+
+UMBRAL_CPU=2.0        # carga por nucleo
+UMBRAL_MEM=90         # % memoria usada
+UMBRAL_DISCO=85       # % disco usado
+UMBRAL_SSH=5          # intentos SSH fallidos en 10 minutos
+SERVICIOS=(ssh named fail2ban auditd cron ufw)
+command -v docker >/dev/null 2>&1 && SERVICIOS+=(docker)
+
+alertas=()
+
+nucleos="$(nproc)"
+carga="$(cut -d' ' -f1 /proc/loadavg)"
+awk -v c="$carga" -v n="$nucleos" -v u="$UMBRAL_CPU" 'BEGIN{exit !(c/n > u)}' && alertas+=("carga_cpu=$carga")
+
+mem="$(free | awk '/^Mem:/{printf "%d", ($2-$7)*100/$2}')"
+(( mem > UMBRAL_MEM )) && alertas+=("memoria=${mem}%")
+
+disco="$(df --output=pcent / | tail -1 | tr -dc '0-9')"
+(( disco > UMBRAL_DISCO )) && alertas+=("disco=${disco}%")
+
+caidos=()
+for s in "${SERVICIOS[@]}"; do
+  systemctl is-active --quiet "$s" || caidos+=("$s")
+done
+(( ${#caidos[@]} )) && alertas+=("servicios_caidos=$(IFS=,; echo "${caidos[*]}")")
+
+app="n/a"
+if command -v docker >/dev/null 2>&1 && docker ps -q --filter name=gestiopera-web | grep -q .; then
+  if curl -fsS -m 5 -o /dev/null http://127.0.0.1/; then app="ok"; else app="caida"; alertas+=("app_web=caida"); fi
+fi
+
+fallos_ssh="$(journalctl -u ssh --since '-10 min' --no-pager -q 2>/dev/null | grep -cE 'Failed password|Invalid user|authentication failure|not allowed because' || true)"
+(( fallos_ssh >= UMBRAL_SSH )) && alertas+=("ssh_fallidos_10min=$fallos_ssh")
+
+baneadas="$(fail2ban-client status sshd 2>/dev/null | awk -F'\t' '/Currently banned/{print $2}' | tr -dc '0-9')"
+baneadas="${baneadas:-0}"
+(( baneadas > 0 )) && alertas+=("ips_bloqueadas=$baneadas")
+
+ultimo_bk="ninguno"
+if [[ -L $DIR_BACKUPS/ultimo ]]; then
+  edad_h=$(( ( $(date +%s) - $(stat -c %Y "$(readlink -f "$DIR_BACKUPS/ultimo")") ) / 3600 ))
+  ultimo_bk="hace_${edad_h}h"
+  (( edad_h > 26 )) && alertas+=("backup_atrasado=${edad_h}h")
+else
+  alertas+=("sin_backups")
+fi
+
+estado="OK"; (( ${#alertas[@]} )) && estado="ALERTA"
+linea="$(date '+%F %T') $estado carga=$carga mem=${mem}% disco=${disco}% servicios=$([[ ${#caidos[@]} -eq 0 ]] && echo ok || echo "${caidos[*]}") app=$app ssh_fallidos_10min=$fallos_ssh ips_bloqueadas=$baneadas backup=$ultimo_bk"
+echo "$linea" >> "$DIR_LOGS/monitor.log"
+
+if [[ $estado == ALERTA ]]; then
+  msg="$(IFS=' '; echo "${alertas[*]}")"
+  echo "$(date '+%F %T') $msg" >> "$DIR_LOGS/alertas.log"
+  logger -p auth.warning -t gestiopera-alerta -- "$msg"
+fi
+[[ -t 1 ]] && echo "$linea"
+exit 0

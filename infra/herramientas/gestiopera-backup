@@ -1,0 +1,76 @@
+#!/usr/bin/env bash
+# gestiopera-backup - Copia de seguridad completa del servidor central
+#   - Archivos empresariales (/srv/empresa) con permisos, ACL y atributos
+#   - Configuracion del sistema (/etc: ssh, ufw, fail2ban, bind, audit, usuarios...)
+#   - Base de datos PostgreSQL de la aplicacion GestiOpera (pg_dump)
+#   - Manifiesto de archivos y sumas SHA-256 para verificar integridad
+# Uso: sudo gestiopera-backup
+set -Eeuo pipefail
+source /etc/gestiopera/config.sh
+[[ $EUID -eq 0 ]] || { echo "Requiere privilegios: sudo $0" >&2; exit 1; }
+
+TS="$(date +%Y%m%d-%H%M%S)"
+DEST="$DIR_BACKUPS/gestiopera-$TS"
+LOG="$DIR_LOGS/backup.log"
+umask 077
+
+log() { echo "$(date '+%F %T') $*" | tee -a "$LOG"; logger -t gestiopera-backup -- "$*"; }
+fallo() { log "ERROR: $*"; logger -p user.err -t gestiopera-alerta -- "Fallo de copia de seguridad: $*"; exit 1; }
+trap 'fallo "linea $LINENO (codigo $?)"' ERR
+
+# tar devuelve 1 si un archivo cambio durante la lectura: es una advertencia, no un fallo
+empaquetar() {
+  local salida="$1"; shift
+  local rc=0
+  tar --acls --xattrs --numeric-owner -czpf "$salida" -C / "$@" 2>>"$LOG" || rc=$?
+  (( rc <= 1 )) || return "$rc"
+}
+
+mkdir -p "$DEST"
+log "INICIO copia $DEST"
+
+# 1) Archivos empresariales
+empaquetar "$DEST/empresa.tar.gz" "${RAIZ_EMPRESA#/}"
+tar -tvzf "$DEST/empresa.tar.gz" > "$DEST/MANIFIESTO-empresa.txt"
+log "  empresa.tar.gz  $(du -h "$DEST/empresa.tar.gz" | cut -f1)  ($(grep -c '^-' "$DEST/MANIFIESTO-empresa.txt" || true) archivos)"
+
+# 2) Configuracion del sistema
+CONF=()
+for p in etc/gestiopera etc/ssh etc/ufw etc/fail2ban etc/bind etc/audit etc/netplan \
+         etc/sudoers.d etc/cron.d etc/logrotate.d/gestiopera etc/security/pwquality.conf.d \
+         etc/passwd etc/group etc/shadow etc/gshadow etc/hosts etc/login.defs etc/issue.net \
+         "${DIR_APP#/}/app/.env" "${DIR_APP#/}/app/docker-compose.servidor.yml"; do
+  [[ -e /$p ]] && CONF+=("$p")
+done
+empaquetar "$DEST/configuracion.tar.gz" "${CONF[@]}"
+log "  configuracion.tar.gz  $(du -h "$DEST/configuracion.tar.gz" | cut -f1)"
+
+# 3) Base de datos de la aplicacion
+if command -v docker >/dev/null 2>&1 && docker ps --format '{{.Names}}' | grep -qx "$APP_CONTENEDOR_BD"; then
+  docker exec "$APP_CONTENEDOR_BD" pg_dump -U "$APP_BD_USUARIO" -d "$APP_BD" --clean --if-exists --no-owner \
+    | gzip -9 > "$DEST/basedatos.sql.gz"
+  log "  basedatos.sql.gz  $(du -h "$DEST/basedatos.sql.gz" | cut -f1)"
+else
+  log "  base de datos: contenedor $APP_CONTENEDOR_BD no esta en ejecucion (se omite)"
+fi
+
+# 4) Integridad e informacion de la copia
+{
+  echo "Copia:     gestiopera-$TS"
+  echo "Servidor:  $(hostname -f 2>/dev/null || hostname)"
+  echo "Fecha:     $(date '+%F %T %Z')"
+  echo "Usuario:   ${SUDO_USER:-root}"
+  echo "Contenido: $(cd "$DEST" && ls -1 | paste -sd' ')"
+} > "$DEST/INFO.txt"
+( cd "$DEST" && sha256sum ./*.gz > SHA256SUMS )
+( cd "$DEST" && sha256sum -c --quiet SHA256SUMS ) || fallo "verificacion SHA-256"
+ln -sfn "$DEST" "$DIR_BACKUPS/ultimo"
+
+# 5) Retencion
+borradas=0
+while IFS= read -r viejo; do
+  rm -rf -- "$viejo"; borradas=$((borradas + 1)); log "  retencion: eliminada $(basename "$viejo")"
+done < <(find "$DIR_BACKUPS" -mindepth 1 -maxdepth 1 -type d -name 'gestiopera-*' -mtime +"$RETENCION_DIAS")
+
+total="$(find "$DIR_BACKUPS" -mindepth 1 -maxdepth 1 -type d -name 'gestiopera-*' | wc -l)"
+log "FIN OK  $(du -sh "$DEST" | cut -f1)  copias_disponibles=$total  eliminadas=$borradas"

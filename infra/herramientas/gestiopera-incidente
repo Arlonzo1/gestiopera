@@ -1,0 +1,82 @@
+#!/usr/bin/env bash
+# gestiopera-incidente - Gestion y documentacion de incidentes de seguridad
+#
+#  sudo gestiopera-incidente nuevo "<titulo>" [Baja|Media|Alta|Critica]
+#  sudo gestiopera-incidente listar
+#  sudo gestiopera-incidente ver <ID>
+#  sudo gestiopera-incidente nota <ID> "<accion realizada>"
+#  sudo gestiopera-incidente cerrar <ID> "<resolucion>"
+#
+#  Cada incidente queda en /srv/empresa/ti/incidentes/<ID>/ con su informe.md
+#  y la carpeta evidencias/ (extractos de bitacoras + sumas SHA-256).
+set -Eeuo pipefail
+source /etc/gestiopera/config.sh
+[[ $EUID -eq 0 ]] || { echo "Requiere privilegios: sudo $0 $*" >&2; exit 1; }
+
+uso() { sed -n '3,10p' "$0" | sed 's/^# \{0,1\}//'; exit 1; }
+QUIEN="${SUDO_USER:-root}"
+AHORA="$(date '+%F %T')"
+dir_de() { local d="$DIR_INCIDENTES/$1"; [[ -d $d ]] || { echo "No existe el incidente $1" >&2; exit 1; }; echo "$d"; }
+bitacora() { echo "| $AHORA | $QUIEN | $2 |" >> "$1/informe.md"; logger -t gestiopera-incidente -- "$(basename "$1"): $2"; }
+
+accion="${1:-}"; shift || true
+case "$accion" in
+  nuevo)
+    titulo="${1:-}"; sev="${2:-Media}"; [[ -n $titulo ]] || uso
+    titulo="${titulo//|//}"; titulo="${titulo//&/y}"   # caracteres especiales de sed/markdown
+    anio="$(date +%Y)"
+    n="$(find "$DIR_INCIDENTES" -maxdepth 1 -type d -name "INC-$anio-*" | wc -l)"
+    id="$(printf 'INC-%s-%03d' "$anio" $((n + 1)))"
+    while [[ -d $DIR_INCIDENTES/$id ]]; do n=$((n + 1)); id="$(printf 'INC-%s-%03d' "$anio" $((n + 1)))"; done
+    d="$DIR_INCIDENTES/$id"; ev="$d/evidencias"
+    install -d -m 2770 -o root -g ti "$d" "$ev"
+
+    sed -e "s|{{ID}}|$id|g" -e "s|{{TITULO}}|$titulo|g" -e "s|{{SEVERIDAD}}|$sev|g" \
+        -e "s|{{FECHA}}|$AHORA|g" -e "s|{{USUARIO}}|$QUIEN|g" -e "s|{{HOST}}|$(hostname)|g" \
+        "$DIR_INCIDENTES/PLANTILLA.md" > "$d/informe.md"
+
+    echo "Recolectando evidencias en $ev ..."
+    gestiopera-eventos --desde hoy               > "$ev/eventos_seguridad.txt" 2>&1 || true
+    journalctl -u ssh --since today --no-pager   > "$ev/journal_ssh.txt" 2>&1 || true
+    journalctl -u fail2ban --since today --no-pager > "$ev/journal_fail2ban.txt" 2>&1 || true
+    fail2ban-client status sshd                  > "$ev/fail2ban_estado.txt" 2>&1 || true
+    ausearch -k acceso_denegado --start today -i > "$ev/auditd_accesos_denegados.txt" 2>&1 || true
+    last -F -w -n 50                             > "$ev/ultimos_accesos.txt" 2>&1 || true
+    ss -tunap                                    > "$ev/conexiones_activas.txt" 2>&1 || true
+    ( cd "$ev" && sha256sum ./*.txt > SHA256SUMS.txt )
+    chgrp -R ti "$d"; chmod 0440 "$ev"/*; chmod 0660 "$d/informe.md"
+    logger -p auth.warning -t gestiopera-incidente -- "Abierto $id ($sev): $titulo por $QUIEN"
+    echo
+    echo "Incidente $id creado:"
+    echo "  Informe:    $d/informe.md   (complete las secciones 1 a 6)"
+    echo "  Evidencias: $(ls "$ev" | paste -sd' ')"
+    ;;
+
+  listar)
+    printf '%-14s %-8s %-9s %s\n' ID ESTADO SEVERIDAD TITULO
+    for d in $(find "$DIR_INCIDENTES" -mindepth 1 -maxdepth 1 -type d -name 'INC-*' | sort); do
+      f="$d/informe.md"
+      printf '%-14s %-8s %-9s %s\n' "$(basename "$d")" \
+        "$(grep -m1 '^| Estado' "$f" | cut -d'|' -f3 | xargs)" \
+        "$(grep -m1 '^| Severidad' "$f" | cut -d'|' -f3 | awk '{print $1}')" \
+        "$(grep -m1 '^| Titulo' "$f" | cut -d'|' -f3 | xargs)"
+    done
+    ;;
+
+  ver)
+    d="$(dir_de "${1:-}")"; cat "$d/informe.md"; echo; echo "Evidencias:"; ls -l "$d/evidencias"
+    ;;
+
+  nota)
+    d="$(dir_de "${1:-}")"; [[ -n ${2:-} ]] || uso; bitacora "$d" "$2"; echo "Nota registrada en $(basename "$d")"
+    ;;
+
+  cerrar)
+    d="$(dir_de "${1:-}")"; [[ -n ${2:-} ]] || uso
+    sed -i 's/^| Estado | ABIERTO |/| Estado | CERRADO |/' "$d/informe.md"
+    bitacora "$d" "Cierre: $2"
+    echo "Incidente $(basename "$d") cerrado"
+    ;;
+
+  *) uso ;;
+esac

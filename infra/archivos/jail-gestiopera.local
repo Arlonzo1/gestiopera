@@ -1,0 +1,15 @@
+# GestiOpera - Politica de fail2ban
+[DEFAULT]
+# Nunca bloquear el propio servidor ni el canal de gestion fuera de banda
+ignoreip = 127.0.0.1/8 ::1 @CANAL_GESTION_IP@
+bantime  = 15m
+findtime = 10m
+maxretry = 3
+# Bloquea solo el puerto atacado (la app web sigue disponible)
+banaction = iptables-multiport
+
+[sshd]
+enabled = true
+mode    = aggressive
+port    = ssh
+backend = systemd

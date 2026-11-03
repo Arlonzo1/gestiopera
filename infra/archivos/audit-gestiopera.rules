@@ -1,0 +1,30 @@
+## GestiOpera - Reglas de auditoria (auditd)
+## Consultar:  sudo ausearch -k <clave> -i     |   sudo gestiopera-auditoria <usuario>
+
+## --- Informacion sensible: toda lectura, escritura o cambio de atributos ---
+-w @RAIZ_EMPRESA@/contabilidad -p rwa -k acceso_contabilidad
+-w @RAIZ_EMPRESA@/gerencia     -p rwa -k acceso_gerencia
+-w @RAIZ_EMPRESA@/ventas       -p wa  -k cambios_ventas
+-w @RAIZ_EMPRESA@/ti           -p wa  -k cambios_ti
+
+## --- Intentos de acceso denegados (permiso insuficiente) por usuarios reales ---
+-a always,exit -F arch=b64 -S open,openat,creat,truncate,chdir -F exit=-EACCES -F auid>=1000 -F auid!=unset -k acceso_denegado
+-a always,exit -F arch=b64 -S open,openat,creat,truncate,chdir -F exit=-EPERM  -F auid>=1000 -F auid!=unset -k acceso_denegado
+
+## --- Identidades y privilegios ---
+-w /etc/passwd   -p wa -k identidad
+-w /etc/group    -p wa -k identidad
+-w /etc/shadow   -p wa -k identidad
+-w /etc/gshadow  -p wa -k identidad
+-w /etc/sudoers    -p wa -k sudoers
+-w /etc/sudoers.d/ -p wa -k sudoers
+
+## --- Configuracion de servicios criticos ---
+-w /etc/ssh/sshd_config   -p wa -k ssh_config
+-w /etc/ssh/sshd_config.d/ -p wa -k ssh_config
+-w /etc/audit/ -p wa -k auditoria_config
+-w /var/backups/gestiopera -p wa -k backups
+
+## --- Comandos ejecutados por usuarios que iniciaron sesion ---
+-a always,exit -F arch=b64 -S execve -F auid>=1000 -F auid!=unset -k comandos_usuarios
+-a always,exit -F arch=b32 -S execve -F auid>=1000 -F auid!=unset -k comandos_usuarios

@@ -1,0 +1,11 @@
+; GestiOpera - Zona inversa @LAN_RED@
+$TTL 3600
+@       IN  SOA ns1.@DOMINIO@. admin.@DOMINIO@. (
+            @SERIAL@ ; serial (AAMMDDhhmm)
+            3600       ; refresh
+            900        ; retry
+            604800     ; expire
+            300 )      ; TTL negativo
+@       IN  NS   ns1.@DOMINIO@.
+10      IN  PTR  @SERVIDOR_HOST@.@DOMINIO@.
+1       IN  PTR  pc-admin.@DOMINIO@.

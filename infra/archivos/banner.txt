@@ -1,0 +1,7 @@
+*******************************************************************
+*  GestiOpera - Servidor central @SERVIDOR_HOST@.@DOMINIO@
+*
+*  Acceso restringido a personal autorizado de la empresa.
+*  Toda actividad es registrada y auditada (auditd, SSH, sudo).
+*  El uso no autorizado sera reportado como incidente de seguridad.
+*******************************************************************

@@ -1,0 +1,12 @@
+// GestiOpera - Zonas autoritativas
+zone "@DOMINIO@" {
+    type primary;
+    file "/etc/bind/db.@DOMINIO@";
+    allow-update { none; };
+};
+
+zone "@LAN_REVERSA@.in-addr.arpa" {
+    type primary;
+    file "/etc/bind/db.@LAN_REVERSA@";
+    allow-update { none; };
+};

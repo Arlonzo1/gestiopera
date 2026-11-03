@@ -1,0 +1,7 @@
+POLITICA DE SEGURIDAD DE LA INFORMACION - GESTIOPERA
+- Cada empleado usa su propia cuenta; esta prohibido compartir contrasenas.
+- Las contrasenas tienen minimo 10 caracteres y caducan cada 90 dias.
+- Cada departamento solo accede a su carpeta (principio de minimo privilegio).
+- Toda actividad en el servidor es registrada y auditada.
+- Los incidentes se reportan de inmediato al area de TI.
+- Se realizan copias de seguridad diarias con retencion de 14 dias.

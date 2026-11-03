@@ -1,0 +1,36 @@
+// GestiOpera - Opciones del DNS interno
+acl "red_empresa" { 127.0.0.0/8; @LAN_RED@; };
+
+options {
+    directory "/var/cache/bind";
+
+    listen-on    { 127.0.0.1; @LAN_IP@; };
+    listen-on-v6 { none; };
+
+    // Solo la red de la empresa puede consultar y usar la recursion
+    allow-query     { red_empresa; };
+    recursion yes;
+    allow-recursion { red_empresa; };
+    allow-transfer  { none; };
+
+    forwarders { @DNS_REENVIADORES@ };
+    dnssec-validation auto;
+
+    version "no disponible";   // no revelar la version de bind
+    querylog yes;              // auditoria de consultas DNS
+};
+
+logging {
+    channel consultas {
+        file "/var/log/named/consultas.log" versions 5 size 10m;
+        print-time yes;
+        severity info;
+    };
+    channel seguridad {
+        file "/var/log/named/seguridad.log" versions 5 size 10m;
+        print-time yes;
+        severity info;
+    };
+    category queries  { consultas; };
+    category security { seguridad; };
+};
