@@ -1,0 +1,17 @@
+bin/
+obj/
+.vs/
+.vscode/
+.env
+*.user
+TestResults/
+coverage/
+frontend/node_modules/
+frontend/dist/
+
+.artifacts/
+*.tsbuildinfo
+frontend/.env.local
+
+# Copias locales de configuración
+*.bak

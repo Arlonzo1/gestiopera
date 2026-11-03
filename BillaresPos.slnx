@@ -1,0 +1,11 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/BillaresPos.Api/BillaresPos.Api.csproj" />
+    <Project Path="src/BillaresPos.Application/BillaresPos.Application.csproj" />
+    <Project Path="src/BillaresPos.Domain/BillaresPos.Domain.csproj" />
+    <Project Path="src/BillaresPos.Infrastructure/BillaresPos.Infrastructure.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/BillaresPos.IntegrationTests/BillaresPos.IntegrationTests.csproj" />
+  </Folder>
+</Solution>
