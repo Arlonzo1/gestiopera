@@ -9,7 +9,9 @@ maxretry = 3
 banaction = iptables-multiport
 
 [sshd]
+# normal: cuenta usuarios inexistentes, claves erroneas y usuarios no permitidos;
+# no castiga el rechazo de una llave publica ajena antes de pedir la contrasena
 enabled = true
-mode    = aggressive
+mode    = normal
 port    = ssh
 backend = systemd
