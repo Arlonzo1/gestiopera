@@ -14,6 +14,8 @@ plantilla() {
   sed -e "s|@DOMINIO@|$DOMINIO|g" \
       -e "s|@SERVIDOR_HOST@|$SERVIDOR_HOST|g" \
       -e "s|@LAN_IF@|$LAN_IF|g" \
+      -e "s|@LAN_IP_HOST@|${LAN_IP##*.}|g" \
+      -e "s|@CLIENTE_HOST@|${CLIENTE_ADMIN_IP##*.}|g" \
       -e "s|@LAN_IP@|$LAN_IP|g" \
       -e "s|@LAN_PREFIJO@|$LAN_PREFIJO|g" \
       -e "s|@LAN_RED@|$LAN_RED|g" \
@@ -33,7 +35,7 @@ plantilla() {
 esperar_apt() {
   local i
   for i in $(seq 1 120); do
-    if ! fuser /var/lib/apt/lists/lock /var/lib/dpkg/lock /var/lib/dpkg/lock-frontend >/dev/null 2>&1; then return 0; fi
+    if ! fuser /var/lib/apt/lists/lock /var/lib/dpkg/lock /var/lib/dpkg/lock-frontend /var/cache/apt/archives/lock >/dev/null 2>&1; then return 0; fi
     (( i == 1 )) && echo "     apt esta ocupado (actualizaciones automaticas); esperando..."
     sleep 5
   done

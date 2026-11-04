@@ -1,7 +1,7 @@
 # GestiOpera - Verificacion del equipo cliente (PC Windows en la red local 192.168.56.0/24)
-# Uso:  powershell -ExecutionPolicy Bypass -File .\probar-cliente.ps1
-$Servidor = '192.168.56.10'
-$Dominio  = 'gestiopera.local'
+# Uso:  powershell -ExecutionPolicy Bypass -File .\probar-cliente.ps1 [-Servidor 192.168.20.50]
+param([string]$Servidor = '192.168.56.10', [string]$Dominio = 'gestiopera.local')
+$Red = ($Servidor -split '\.')[0..2] -join '.'
 
 function Resultado($nombre, $ok, $detalle) {
     $estado = if ($ok) { 'OK   ' } else { 'FALLO' }
@@ -11,8 +11,8 @@ function Resultado($nombre, $ok, $detalle) {
 
 Write-Host "`nGestiOpera - prueba del equipo cliente $env:COMPUTERNAME`n" -ForegroundColor Cyan
 
-$ip = Get-NetIPAddress -AddressFamily IPv4 -ErrorAction SilentlyContinue | Where-Object IPAddress -like '192.168.56.*' | Select-Object -First 1
-Resultado 'IP del cliente en la LAN' ($null -ne $ip) $ip.IPAddress
+$ip = Get-NetIPAddress -AddressFamily IPv4 -ErrorAction SilentlyContinue | Where-Object IPAddress -like "$Red.*" | Select-Object -First 1
+Resultado "IP del cliente en la red $Red.0/24" ($null -ne $ip) $(if ($ip) { $ip.IPAddress } else { 'este equipo no esta en la red del servidor' })
 
 $ping = Test-Connection -ComputerName $Servidor -Count 2 -Quiet
 Resultado "Ping al servidor $Servidor" $ping ''
@@ -35,4 +35,4 @@ try {
 } catch { Resultado 'Aplicacion web GestiOpera' $false $_.Exception.Message }
 
 Write-Host "`nPara usar los nombres DNS en el navegador, configure el DNS del adaptador" -ForegroundColor Yellow
-Write-Host "'VirtualBox Host-Only Ethernet Adapter' con el servidor $Servidor (sufijo $Dominio)." -ForegroundColor Yellow
+Write-Host "de red (Wi-Fi o Host-Only) con el servidor $Servidor (sufijo $Dominio)." -ForegroundColor Yellow

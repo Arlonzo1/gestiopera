@@ -11,8 +11,10 @@ if [[ ! -f $FUENTE ]]; then
 fi
 
 paso "Docker"
-esperar_apt
-apt-get install "${APT_OPC[@]}" docker.io docker-compose-v2
+if ! command -v docker >/dev/null 2>&1 || ! docker compose version >/dev/null 2>&1; then
+  esperar_apt
+  apt-get install "${APT_OPC[@]}" docker.io docker-compose-v2
+fi
 systemctl enable --now docker >/dev/null 2>&1
 docker --version; docker compose version
 

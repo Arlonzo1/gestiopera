@@ -108,6 +108,20 @@ informe de eventos diario 06:00, informe de auditoría semanal (lunes 07:00).
 - Docker publica el puerto 80 directamente en iptables (no pasa por UFW); en este diseño solo
   hay acceso desde la LAN Host-Only y el NAT de VirtualBox.
 
+### Varios computadores en la misma red Wi-Fi
+
+Para que otros equipos reales se conecten, el adaptador 2 de la VM debe estar en
+**Adaptador puente** sobre el Wi-Fi (la red Host-Only solo la ve el PC anfitrión).
+Luego, dentro del servidor, con una IP libre de esa red y la IP del PC anfitrión:
+
+```bash
+sudo bash ~/gestiopera-infra/cambiar-red.sh 192.168.20.50 192.168.20.18
+```
+
+Los clientes prueban con `probar-cliente.ps1 -Servidor 192.168.20.50` y simulan el
+ataque con `simular-ataque.ps1 -Servidor 192.168.20.50`. Para volver a la red
+Host-Only: `sudo bash ~/gestiopera-infra/cambiar-red.sh --hostonly`.
+
 ## 6. Documentos
 
 - [Guía práctica en Word: servidor, usuarios y las 4 pruebas](docs/Guia_Practica_Servidor_y_Usuarios_GestiOpera.docx)
@@ -122,6 +136,7 @@ informe de eventos diario 06:00, informe de auditoría semanal (lunes 07:00).
 infra/
 ├── instalar.sh            orquestador (ejecuta modulos/NN-*.sh en orden)
 ├── config.sh              parámetros (IPs, dominio, usuarios, rutas, retención)
+├── cambiar-red.sh         cambia la red del servidor (Wi-Fi puente o Host-Only) en un comando
 ├── modulos/               01-base … 12-app
 ├── archivos/              plantillas de configuración (sshd, jail, bind, audit, cron…)
 ├── herramientas/          comandos gestiopera-* que se instalan en /usr/local/sbin
