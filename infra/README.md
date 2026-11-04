@@ -111,6 +111,7 @@ informe de eventos diario 06:00, informe de auditoría semanal (lunes 07:00).
 ## 6. Documentos
 
 - [Guía práctica en Word: servidor, usuarios y las 4 pruebas](docs/Guia_Practica_Servidor_y_Usuarios_GestiOpera.docx)
+- [Guion de comandos en Word: las 4 pruebas paso a paso](docs/Guion_Comandos_Pruebas_GestiOpera.docx)
 - [Guía de demostración (las 4 pruebas)](docs/GUIA-DEMOSTRACION.md)
 - [Plan de continuidad y recuperación ante desastres](docs/PLAN-CONTINUIDAD.md)
 - [Procedimiento de gestión de incidentes](docs/GESTION-INCIDENTES.md)
