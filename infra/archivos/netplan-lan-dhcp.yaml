@@ -1,0 +1,15 @@
+# GestiOpera - Red local por DHCP (redes que asignan la IP: universidad, hotspot)
+# La IP la entrega la red; cambiar-red.sh --dhcp la registra en config.sh.
+# No se usan la ruta por defecto ni el DNS de esta red: Internet sigue por enp0s3 (NAT).
+network:
+  version: 2
+  ethernets:
+    @LAN_IF@:
+      dhcp4: true
+      dhcp4-overrides:
+        use-routes: false
+        use-dns: false
+      dhcp6: false
+      nameservers:
+        addresses: [@LAN_IP@]
+        search: [@DOMINIO@]

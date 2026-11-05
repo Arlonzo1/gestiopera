@@ -9,13 +9,16 @@ paso() { echo "  -> $*"; }
 # plantilla <origen en archivos/> <destino> <modo> [usuario] [grupo]
 # Copia el archivo reemplazando las variables @NOMBRE@ por su valor.
 plantilla() {
-  local src="$BASE/archivos/$1" dst="$2" modo="$3" usr="${4:-root}" grp="${5:-root}" tmp
+  local src="$BASE/archivos/$1" dst="$2" modo="$3" usr="${4:-root}" grp="${5:-root}" tmp ptr_cliente
   tmp="$(mktemp)"
+  # El PTR del PC administrador solo cabe en la zona inversa si comparte los 3 primeros octetos
+  ptr_cliente="${CLIENTE_ADMIN_IP##*.}"
+  [[ ${CLIENTE_ADMIN_IP%.*} == "${LAN_IP%.*}" ]] || ptr_cliente="; ${CLIENTE_ADMIN_IP##*.}"
   sed -e "s|@DOMINIO@|$DOMINIO|g" \
       -e "s|@SERVIDOR_HOST@|$SERVIDOR_HOST|g" \
       -e "s|@LAN_IF@|$LAN_IF|g" \
       -e "s|@LAN_IP_HOST@|${LAN_IP##*.}|g" \
-      -e "s|@CLIENTE_HOST@|${CLIENTE_ADMIN_IP##*.}|g" \
+      -e "s|@CLIENTE_HOST@|$ptr_cliente|g" \
       -e "s|@LAN_IP@|$LAN_IP|g" \
       -e "s|@LAN_PREFIJO@|$LAN_PREFIJO|g" \
       -e "s|@LAN_RED@|$LAN_RED|g" \

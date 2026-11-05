@@ -115,8 +115,15 @@ Para que otros equipos reales se conecten, el adaptador 2 de la VM debe estar en
 Luego, dentro del servidor, con una IP libre de esa red y la IP del PC anfitrión:
 
 ```bash
+# red de casa: IP fija libre + IP del PC anfitrion
 sudo bash ~/gestiopera-infra/cambiar-red.sh 192.168.20.50 192.168.20.18
+# red de universidad u hotspot: la red asigna la IP (acepta redes /22, /23...)
+sudo bash ~/gestiopera-infra/cambiar-red.sh --dhcp 20.20.2.111
 ```
+
+Al cambiar de red (otro Wi-Fi, otro lugar) hay que volver a ejecutarlo: la IP del
+servidor cambia. Si una red de universidad aísla a los equipos entre sí, use el
+hotspot de un celular.
 
 Los clientes prueban con `probar-cliente.ps1 -Servidor 192.168.20.50` y simulan el
 ataque con `simular-ataque.ps1 -Servidor 192.168.20.50`. Para volver a la red

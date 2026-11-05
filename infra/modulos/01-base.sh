@@ -10,8 +10,12 @@ paso "Zona horaria $ZONA_HORARIA"
 timedatectl set-timezone "$ZONA_HORARIA"
 timedatectl set-ntp true || true
 
-paso "Red local: $LAN_IF = $LAN_IP/$LAN_PREFIJO"
-plantilla netplan-lan.yaml /etc/netplan/60-gestiopera-lan.yaml 0600
+paso "Red local: $LAN_IF = $LAN_IP/$LAN_PREFIJO (modo ${LAN_MODO:-estatica})"
+if [[ ${LAN_MODO:-estatica} == dhcp ]]; then
+  plantilla netplan-lan-dhcp.yaml /etc/netplan/60-gestiopera-lan.yaml 0600
+else
+  plantilla netplan-lan.yaml /etc/netplan/60-gestiopera-lan.yaml 0600
+fi
 netplan generate
 netplan apply
 sleep 3

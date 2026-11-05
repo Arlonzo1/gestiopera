@@ -12,6 +12,7 @@ SERVIDOR_HOST="servidor"
 LAN_IF="enp0s8"
 LAN_IP="192.168.56.10"
 LAN_PREFIJO="24"
+LAN_MODO="estatica"          # estatica | dhcp
 LAN_RED="192.168.56.0/24"
 LAN_REVERSA="56.168.192"          # zona inversa in-addr.arpa
 CLIENTE_ADMIN_IP="192.168.56.1"   # PC Windows (equipo cliente de TI)
